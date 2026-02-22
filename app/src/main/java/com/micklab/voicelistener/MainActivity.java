@@ -177,9 +177,6 @@ public class MainActivity extends Activity {
         updateStatus();
         
         Toast.makeText(this, "音声監視を開始しました", Toast.LENGTH_SHORT).show();
-        
-        // ログに記録
-        logManager.writeLog("アプリから音声監視開始");
     }
     
     private void stopVoiceListening() {
@@ -191,9 +188,6 @@ public class MainActivity extends Activity {
         updateStatus();
         
         Toast.makeText(this, "音声監視を停止しました", Toast.LENGTH_SHORT).show();
-        
-        // ログに記録
-        logManager.writeLog("アプリから音声監視停止");
     }
     
     private void updateButtons() {

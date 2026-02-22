@@ -64,9 +64,6 @@ public class VoiceListenerService extends Service implements RecognitionListener
         if (speechRecognizer != null) {
             speechRecognizer.destroy();
         }
-        
-        // サービス終了をログに記録
-        logManager.writeLog("音声監視サービス終了");
     }
     
     @Override
@@ -119,7 +116,9 @@ public class VoiceListenerService extends Service implements RecognitionListener
             recognizerIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
             recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, 
                 RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-            recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.JAPAN.toString());
+            recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.JAPAN.toLanguageTag());
+            recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, Locale.JAPAN.toLanguageTag());
+            recognizerIntent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
             recognizerIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
             recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
         } else {
@@ -132,7 +131,6 @@ public class VoiceListenerService extends Service implements RecognitionListener
             isListening = true;
             speechRecognizer.startListening(recognizerIntent);
             Log.d(TAG, "音声監視開始");
-            logManager.writeLog("音声監視開始");
         }
     }
     
@@ -184,48 +182,7 @@ public class VoiceListenerService extends Service implements RecognitionListener
     public void onError(int error) {
         Log.e(TAG, "音声認識エラー: " + error);
         isListening = false;
-        
-        // エラーハンドリング
-        String errorMessage = "音声認識エラー: ";
-        switch (error) {
-            case SpeechRecognizer.ERROR_AUDIO:
-                errorMessage += "オーディオ録音エラー";
-                break;
-            case SpeechRecognizer.ERROR_CLIENT:
-                errorMessage += "クライアントエラー";
-                break;
-            case SpeechRecognizer.ERROR_INSUFFICIENT_PERMISSIONS:
-                errorMessage += "権限不足";
-                break;
-            case SpeechRecognizer.ERROR_NETWORK:
-                errorMessage += "ネットワークエラー";
-                break;
-            case SpeechRecognizer.ERROR_NETWORK_TIMEOUT:
-                errorMessage += "ネットワークタイムアウト";
-                break;
-            case SpeechRecognizer.ERROR_NO_MATCH:
-                // 音声が認識されなかった場合は再開
-                restartListening();
-                return;
-            case SpeechRecognizer.ERROR_RECOGNIZER_BUSY:
-                errorMessage += "認識エンジンビジー";
-                break;
-            case SpeechRecognizer.ERROR_SERVER:
-                errorMessage += "サーバーエラー";
-                break;
-            case SpeechRecognizer.ERROR_SPEECH_TIMEOUT:
-                errorMessage += "音声タイムアウト";
-                // タイムアウトの場合は再開
-                restartListening();
-                return;
-            default:
-                errorMessage += "不明なエラー";
-                break;
-        }
-        
-        logManager.writeLog(errorMessage);
-        
-        // エラー後に再開を試行
+
         restartListening();
     }
     
@@ -233,11 +190,12 @@ public class VoiceListenerService extends Service implements RecognitionListener
     public void onResults(Bundle results) {
         ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
         if (matches != null && !matches.isEmpty()) {
-            String recognizedText = matches.get(0);
+            String recognizedText = matches.get(0).trim();
             Log.d(TAG, "認識結果: " + recognizedText);
             
-            // ログに記録
-            logManager.writeLog("認識: " + recognizedText);
+            if (!recognizedText.isEmpty()) {
+                logManager.writeLog("認識: " + recognizedText);
+            }
         }
         
         // 継続監視のため再開

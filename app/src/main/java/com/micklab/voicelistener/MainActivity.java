@@ -14,11 +14,15 @@ import android.widget.TextView;
 import android.widget.Toast;
 import android.widget.SeekBar;
 import android.content.SharedPreferences;
+import android.os.Handler;
+import android.os.Looper;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.util.ArrayDeque;
 import java.util.ArrayList;
+import java.util.Deque;
 
 public class MainActivity extends Activity {
     
@@ -31,8 +35,14 @@ public class MainActivity extends Activity {
     private Button stopButton;
     private TextView statusText;
     private TextView logPathText;
+    private TextView fileMetaText;
     private EditText logContentText;
     private ScrollView logScrollView;
+
+    private Handler uiHandler;
+    private Runnable periodicUpdateRunnable;
+    private static final int UPDATE_INTERVAL_MS = 5000; // 5s
+
     private LogManager logManager;
     private boolean isServiceRunning = false;
     
@@ -69,8 +79,15 @@ public class MainActivity extends Activity {
         logPathText = new TextView(this);
         logPathText.setText("ログ保存先: " + logManager.getLogFolderPath());
         logPathText.setTextSize(12);
-        logPathText.setPadding(0, 0, 0, 20);
+        logPathText.setPadding(0, 0, 0, 6);
         layout.addView(logPathText);
+
+        // ログファイルのメタ情報（サイズ・最終更新）
+        fileMetaText = new TextView(this);
+        fileMetaText.setText("ログファイル: -");
+        fileMetaText.setTextSize(12);
+        fileMetaText.setPadding(0, 0, 0, 20);
+        layout.addView(fileMetaText);
         
         // VAD閾値スライダー
         final int VAD_MIN = 100;
@@ -286,14 +303,12 @@ public class MainActivity extends Activity {
     }
     
     private void stopVoiceListening() {
-        Intent serviceIntent = new Intent(this, VoiceListenerService.class);
-        stopService(serviceIntent);
-        
+        // UI上の監視表示を停止するが、バックグラウンドの音声認識とログ出力は継続させる
+        // 既存の stopService を呼ばないことでサービスは存続する
         isServiceRunning = false;
         updateButtons();
         updateStatus();
-        
-        Toast.makeText(this, "音声監視を停止しました", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "UI上の監視を停止しました（バックグラウンドは継続）", Toast.LENGTH_SHORT).show();
     }
     
     private void updateButtons() {
@@ -310,9 +325,10 @@ public class MainActivity extends Activity {
             File[] logFiles = logManager.getLogFiles();
             if (logFiles == null || logFiles.length == 0) {
                 logContentText.setText("ログファイルがありません");
+                fileMetaText.setText("ログファイル: -");
                 return;
             }
-            
+
             // 最新のログファイルを取得
             File latestLogFile = null;
             long latestTime = 0;
@@ -322,33 +338,72 @@ public class MainActivity extends Activity {
                     latestLogFile = file;
                 }
             }
-            
+
             if (latestLogFile != null) {
-                StringBuilder logContent = new StringBuilder();
-                
+                // メタ情報を更新
+                updateLogMeta(latestLogFile);
+
+                // ログは末尾200行を表示する
+                int maxLines = 200;
+                Deque<String> deque = new ArrayDeque<>(maxLines);
                 try (BufferedReader reader = new BufferedReader(new FileReader(latestLogFile))) {
                     String line;
-                    int lineCount = 0;
-                    while ((line = reader.readLine()) != null && lineCount < 100) {
-                        logContent.append(line).append("\n");
-                        lineCount++;
+                    while ((line = reader.readLine()) != null) {
+                        if (deque.size() == maxLines) deque.removeFirst();
+                        deque.addLast(line);
                     }
                 }
-                
+
+                StringBuilder logContent = new StringBuilder();
+                for (String l : deque) {
+                    logContent.append(l).append('\n');
+                }
+
                 logContentText.setText(logContent.toString());
-                
+
                 // スクロールを最下部に移動
                 logScrollView.post(() -> logScrollView.fullScroll(ScrollView.FOCUS_DOWN));
             }
-            
+
         } catch (IOException e) {
             logContentText.setText("ログ読み込みエラー: " + e.getMessage());
         }
+    }
+
+    private void updateLogMeta(File latestLogFile) {
+        if (latestLogFile == null) return;
+        String name = latestLogFile.getName();
+        long size = latestLogFile.length();
+        long lm = latestLogFile.lastModified();
+        String lmStr = android.text.format.DateFormat.format("yyyy-MM-dd HH:mm:ss", new java.util.Date(lm)).toString();
+        fileMetaText.setText(String.format("ログファイル: %s  サイズ: %d bytes  最終更新: %s", name, size, lmStr));
     }
     
     @Override
     protected void onResume() {
         super.onResume();
         updateLogDisplay();
+        // 定期更新を開始
+        if (uiHandler == null) uiHandler = new Handler(Looper.getMainLooper());
+        if (periodicUpdateRunnable == null) {
+            periodicUpdateRunnable = new Runnable() {
+                @Override
+                public void run() {
+                    try {
+                        updateLogDisplay();
+                    } catch (Exception ignored) {}
+                    uiHandler.postDelayed(this, UPDATE_INTERVAL_MS);
+                }
+            };
+        }
+        uiHandler.post(periodicUpdateRunnable);
+    }
+
+    @Override
+    protected void onPause() {
+        super.onPause();
+        if (uiHandler != null && periodicUpdateRunnable != null) {
+            uiHandler.removeCallbacks(periodicUpdateRunnable);
+        }
     }
 }

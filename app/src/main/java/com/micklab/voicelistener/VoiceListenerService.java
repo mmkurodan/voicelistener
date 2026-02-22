@@ -509,9 +509,18 @@ public class VoiceListenerService extends Service {
             return;
         }
         transcriptionExecutor.execute(() -> {
-            String recognizedText = asrEngine == null ? null : asrEngine.transcribe(segment, SAMPLE_RATE_HZ);
-            if (recognizedText != null && !recognizedText.trim().isEmpty()) {
-                logManager.writeLog("認識: " + recognizedText.trim());
+            try {
+                OfflineAsrEngine engine = asrEngine; // snapshot to avoid race with shutdown
+                if (engine == null) return;
+                String recognizedText = engine.transcribe(segment, SAMPLE_RATE_HZ);
+                if (recognizedText != null && !recognizedText.trim().isEmpty()) {
+                    if (logManager != null) {
+                        try { logManager.writeLog("認識: " + recognizedText.trim()); } catch (Exception ignored) {}
+                    }
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "Transcription task failed", e);
+                try { if (logManager != null) logManager.writeLog("Transcription例外: " + e.getMessage()); } catch (Exception ignored) {}
             }
         });
     }

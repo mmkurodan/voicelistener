@@ -2,7 +2,7 @@
 set -e
 
 git add .
-git commit -m "update"
+git commit -m "update" || true
 git push
 
 echo "=== Changes pushed and GitHub Actions triggered ==="

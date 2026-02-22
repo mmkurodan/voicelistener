@@ -212,7 +212,6 @@ public class VoiceListenerService extends Service {
         asrEngine = new NoOpOfflineAsrEngine();
         asrEngine.initialize();
         Log.w(TAG, "ASR engine fallback: " + asrEngine.name() + " (model missing)");
-        installModelIfMissingAsync(modelDir);
     }
 
     private void installModelIfMissingAsync(File modelDir) {

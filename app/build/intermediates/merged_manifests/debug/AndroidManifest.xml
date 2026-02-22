@@ -1,54 +1,61 @@
-<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.micklab.voicelistener"
+    android:versionCode="1"
+    android:versionName="1.0" >
+
+    <uses-sdk
+        android:minSdkVersion="24"
+        android:targetSdkVersion="34" />
 
     <!-- 音声録音権限 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
-    
+
     <!-- 外部ストレージ書き込み権限 -->
     <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
     <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-    
+
     <!-- フォアグラウンドサービス権限 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
-    
+
     <!-- システム起動時の自動開始 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
-    
+
     <!-- 通知権限 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 
     <application
+        android:debuggable="true"
+        android:extractNativeLibs="false"
         android:label="voicelistener"
-        android:theme="@android:style/Theme.Material.Light">
-
+        android:theme="@android:style/Theme.Material.Light" >
         <activity
-            android:name=".MainActivity"
-            android:exported="true">
-
+            android:name="com.micklab.voicelistener.MainActivity"
+            android:exported="true" >
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
+
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
-
         </activity>
 
         <!-- 音声監視サービス -->
         <service
-            android:name=".VoiceListenerService"
+            android:name="com.micklab.voicelistener.VoiceListenerService"
             android:enabled="true"
             android:exported="false"
             android:foregroundServiceType="microphone" />
 
         <!-- システム起動時の自動開始レシーバー -->
         <receiver
-            android:name=".BootReceiver"
+            android:name="com.micklab.voicelistener.BootReceiver"
             android:enabled="true"
-            android:exported="true">
+            android:exported="true" >
             <intent-filter>
                 <action android:name="android.intent.action.BOOT_COMPLETED" />
             </intent-filter>
         </receiver>
-
     </application>
 
 </manifest>

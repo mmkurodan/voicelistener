@@ -1,0 +1,99 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:1:1-54:12
+INJECTED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:1:1-54:12
+INJECTED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:1:1-54:12
+INJECTED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:1:1-54:12
+	package
+		INJECTED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml
+	android:versionName
+		INJECTED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml
+	android:versionCode
+		INJECTED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml
+	xmlns:android
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:1:11-69
+uses-permission#android.permission.RECORD_AUDIO
+ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:4:5-71
+	android:name
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:4:22-68
+uses-permission#android.permission.WRITE_EXTERNAL_STORAGE
+ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:7:5-81
+	android:name
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:7:22-78
+uses-permission#android.permission.READ_EXTERNAL_STORAGE
+ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:8:5-80
+	android:name
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:8:22-77
+uses-permission#android.permission.FOREGROUND_SERVICE
+ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:11:5-77
+	android:name
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:11:22-74
+uses-permission#android.permission.FOREGROUND_SERVICE_MICROPHONE
+ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:12:5-88
+	android:name
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:12:22-85
+uses-permission#android.permission.RECEIVE_BOOT_COMPLETED
+ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:15:5-81
+	android:name
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:15:22-78
+uses-permission#android.permission.POST_NOTIFICATIONS
+ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:18:5-77
+	android:name
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:18:22-74
+application
+ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:20:5-52:19
+INJECTED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:20:5-52:19
+	android:extractNativeLibs
+		INJECTED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml
+	android:label
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:21:9-38
+	android:theme
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:22:9-60
+activity#com.micklab.voicelistener.MainActivity
+ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:24:9-33:20
+	android:exported
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:26:13-36
+	android:name
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:25:13-41
+intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
+ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:28:13-31:29
+action#android.intent.action.MAIN
+ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:29:17-69
+	android:name
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:29:25-66
+category#android.intent.category.LAUNCHER
+ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:30:17-77
+	android:name
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:30:27-74
+service#com.micklab.voicelistener.VoiceListenerService
+ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:36:9-40:58
+	android:enabled
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:38:13-35
+	android:exported
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:39:13-37
+	android:foregroundServiceType
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:40:13-55
+	android:name
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:37:13-49
+receiver#com.micklab.voicelistener.BootReceiver
+ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:43:9-50:20
+	android:enabled
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:45:13-35
+	android:exported
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:46:13-36
+	android:name
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:44:13-41
+intent-filter#action:name:android.intent.action.BOOT_COMPLETED
+ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:47:13-49:29
+action#android.intent.action.BOOT_COMPLETED
+ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:48:17-79
+	android:name
+		ADDED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml:48:25-76
+uses-sdk
+INJECTED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml
+INJECTED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml
+	android:targetSdkVersion
+		INJECTED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from /home/userland/voicelistener/app/src/main/AndroidManifest.xml

@@ -1,0 +1,7 @@
+com.micklab.voicelistener.app-pngs-0 /home/userland/voicelistener/app/build/generated/res/pngs/debug
+com.micklab.voicelistener.app-resValues-1 /home/userland/voicelistener/app/build/generated/res/resValues/debug
+com.micklab.voicelistener.app-packageDebugResources-2 /home/userland/voicelistener/app/build/intermediates/incremental/debug/packageDebugResources/merged.dir
+com.micklab.voicelistener.app-packageDebugResources-3 /home/userland/voicelistener/app/build/intermediates/incremental/debug/packageDebugResources/stripped.dir
+com.micklab.voicelistener.app-merged_res-4 /home/userland/voicelistener/app/build/intermediates/merged_res/debug
+com.micklab.voicelistener.app-debug-5 /home/userland/voicelistener/app/src/debug/res
+com.micklab.voicelistener.app-main-6 /home/userland/voicelistener/app/src/main/res

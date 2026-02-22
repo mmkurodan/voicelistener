@@ -132,4 +132,20 @@ public class LogManager {
             }
         }
     }
+
+    public void clearAllLogs() {
+        File[] logFiles = getLogFiles();
+        if (logFiles == null) return;
+        for (File f : logFiles) {
+            try {
+                if (f.delete()) {
+                    Log.d(TAG, "ログファイル削除: " + f.getName());
+                } else {
+                    Log.w(TAG, "ログファイル削除失敗: " + f.getName());
+                }
+            } catch (Exception e) {
+                Log.w(TAG, "ログ削除中例外: " + f.getName(), e);
+            }
+        }
+    }
 }

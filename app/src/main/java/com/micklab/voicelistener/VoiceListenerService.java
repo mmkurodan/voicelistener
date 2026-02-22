@@ -48,6 +48,10 @@ public class VoiceListenerService extends Service {
     private static final String VOSK_MODEL_FOLDER = "vosk-model-ja";
     private static final String MODEL_ZIP_URL = "https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip";
 
+    public static final String ACTION_INSTALL_MODEL = "com.micklab.voicelistener.action.INSTALL_MODEL";
+    public static final String EXTRA_MODEL_URL = "com.micklab.voicelistener.extra.MODEL_URL";
+    public static final String EXTRA_MODEL_REPLACE = "com.micklab.voicelistener.extra.MODEL_REPLACE";
+
     private LogManager logManager;
     private VoiceActivityDetector vad;
     private OfflineAsrEngine asrEngine;
@@ -77,6 +81,17 @@ public class VoiceListenerService extends Service {
         Log.d(TAG, "VoiceListenerService started");
 
         startForeground(NOTIFICATION_ID, createNotification());
+
+        // intent がモデルインストール要求を含む場合は先に処理する
+        if (intent != null && ACTION_INSTALL_MODEL.equals(intent.getAction())) {
+            String url = intent.getStringExtra(EXTRA_MODEL_URL);
+            boolean replace = intent.getBooleanExtra(EXTRA_MODEL_REPLACE, true);
+            File documentsDir = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS);
+            if (documentsDir == null) documentsDir = getFilesDir();
+            File modelDir = new File(new File(documentsDir, "VoiceListener"), VOSK_MODEL_FOLDER);
+            installModelFromUrlAsync(modelDir, (url == null || url.isEmpty()) ? MODEL_ZIP_URL : url, replace);
+        }
+
         startAudioCapture();
 
         return START_STICKY;
@@ -168,16 +183,23 @@ public class VoiceListenerService extends Service {
     }
 
     private void installModelIfMissingAsync(File modelDir) {
-        if (modelDir.exists() && modelDir.isDirectory() && modelDir.listFiles() != null && modelDir.listFiles().length > 0) {
+        installModelFromUrlAsync(modelDir, MODEL_ZIP_URL, false);
+    }
+
+    private void installModelFromUrlAsync(File modelDir, String url, boolean replace) {
+        if (!replace && modelDir.exists() && modelDir.isDirectory() && modelDir.listFiles() != null && modelDir.listFiles().length > 0) {
             // 既に存在する
             return;
+        }
+        if (replace && modelDir.exists()) {
+            deleteRecursively(modelDir);
         }
         if (modelInstallerExecutor == null) {
             modelInstallerExecutor = Executors.newSingleThreadExecutor();
         }
         modelInstallerExecutor.execute(() -> {
             try {
-                logManager.writeLog("モデル未検出: ダウンロードを開始します");
+                logManager.writeLog("モデル取得開始: " + url);
             } catch (Exception e) {
                 Log.w(TAG, "ログ書き込み失敗", e);
             }
@@ -185,7 +207,7 @@ public class VoiceListenerService extends Service {
             File cacheZip = new File(getCacheDir(), "vosk_model.zip");
             File extractDir = new File(getCacheDir(), "vosk_model_extract");
             try {
-                boolean dlOk = downloadFile(MODEL_ZIP_URL, cacheZip);
+                boolean dlOk = downloadFile(url, cacheZip);
                 if (!dlOk) {
                     logManager.writeLog("モデルダウンロード失敗");
                     return;

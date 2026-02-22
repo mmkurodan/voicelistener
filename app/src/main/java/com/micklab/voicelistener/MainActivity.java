@@ -7,6 +7,7 @@ import android.content.pm.PackageManager;
 import android.os.Build;
 import android.os.Bundle;
 import android.widget.Button;
+import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
@@ -81,7 +82,46 @@ public class MainActivity extends Activity {
         stopButton.setOnClickListener(v -> stopVoiceListening());
         stopButton.setEnabled(false);
         layout.addView(stopButton);
-        
+
+        // モデルURL入力
+        final EditText urlInput = new EditText(this);
+        urlInput.setHint("モデルZIPのURLを入力 (例: https://...)");
+        urlInput.setText("https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip");
+        layout.addView(urlInput);
+
+        // モデル入れ替えボタン
+        Button replaceModelButton = new Button(this);
+        replaceModelButton.setText("モデル入れ替え");
+        replaceModelButton.setOnClickListener(v -> {
+            String url = urlInput.getText().toString().trim();
+            if (url.isEmpty()) {
+                Toast.makeText(this, "URLを入力してください", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Intent intent = new Intent(this, VoiceListenerService.class);
+            intent.setAction(VoiceListenerService.ACTION_INSTALL_MODEL);
+            intent.putExtra(VoiceListenerService.EXTRA_MODEL_URL, url);
+            intent.putExtra(VoiceListenerService.EXTRA_MODEL_REPLACE, true);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent);
+            } else {
+                startService(intent);
+            }
+            Toast.makeText(this, "モデル入れ替えを開始しました", Toast.LENGTH_SHORT).show();
+        });
+        layout.addView(replaceModelButton);
+
+        // ログ初期化ボタン
+        Button clearLogsButton = new Button(this);
+        clearLogsButton.setText("ログ初期化");
+        clearLogsButton.setOnClickListener(v -> {
+            logManager.clearAllLogs();
+            updateLogDisplay();
+            logPathText.setText("ログ保存先: " + logManager.getLogFolderPath());
+            Toast.makeText(this, "ログを初期化しました", Toast.LENGTH_SHORT).show();
+        });
+        layout.addView(clearLogsButton);
+
         // ログ表示更新ボタン
         Button refreshLogButton = new Button(this);
         refreshLogButton.setText("ログ表示更新");

@@ -16,6 +16,7 @@ import android.os.Environment;
 import android.os.IBinder;
 import android.util.Log;
 import java.io.File;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -147,8 +148,36 @@ public class VoiceListenerService extends Service {
         if (isCapturing) {
             return;
         }
+        ArrayList<String> missing = new ArrayList<>();
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
-            Log.e(TAG, "RECORD_AUDIO permission is not granted");
+            missing.add(Manifest.permission.RECORD_AUDIO);
+        }
+        if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
+            missing.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            missing.add(Manifest.permission.POST_NOTIFICATIONS);
+        }
+        if (!missing.isEmpty()) {
+            StringBuilder sb = new StringBuilder();
+            sb.append("権限不足: ");
+            for (int i = 0; i < missing.size(); i++) {
+                if (i > 0) sb.append(", ");
+                String p = missing.get(i);
+                if (Manifest.permission.RECORD_AUDIO.equals(p)) sb.append("録音");
+                else if (Manifest.permission.WRITE_EXTERNAL_STORAGE.equals(p) || Manifest.permission.READ_EXTERNAL_STORAGE.equals(p)) sb.append("外部ストレージ");
+                else if (Manifest.permission.POST_NOTIFICATIONS.equals(p)) sb.append("通知");
+                else sb.append(p);
+            }
+            String msg = sb.toString();
+            Log.e(TAG, msg);
+            if (logManager != null) {
+                try {
+                    logManager.writeLog(msg);
+                } catch (Exception e) {
+                    Log.e(TAG, "Failed to write permission log", e);
+                }
+            }
             stopSelf();
             return;
         }

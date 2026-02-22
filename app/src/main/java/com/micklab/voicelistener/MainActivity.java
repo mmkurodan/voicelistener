@@ -15,6 +15,7 @@ import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
 import java.io.IOException;
+import java.util.ArrayList;
 
 public class MainActivity extends Activity {
     
@@ -112,58 +113,84 @@ public class MainActivity extends Activity {
     }
     
     private void checkPermissions() {
-        boolean allPermissionsGranted = true;
-        
-        for (String permission : REQUIRED_PERMISSIONS) {
-            if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) {
-                allPermissionsGranted = false;
-                break;
-            }
-        }
-        
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) 
-                != PackageManager.PERMISSION_GRANTED) {
-                allPermissionsGranted = false;
-            }
-        }
-        
-        if (!allPermissionsGranted) {
-            String[] permissionsToRequest = REQUIRED_PERMISSIONS;
-            
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
-                permissionsToRequest = new String[REQUIRED_PERMISSIONS.length + 1];
-                System.arraycopy(REQUIRED_PERMISSIONS, 0, permissionsToRequest, 0, REQUIRED_PERMISSIONS.length);
-                permissionsToRequest[REQUIRED_PERMISSIONS.length] = Manifest.permission.POST_NOTIFICATIONS;
-            }
-            
-            requestPermissions(permissionsToRequest, PERMISSION_REQUEST_CODE);
+        String[] missing = getMissingPermissions();
+        if (missing.length > 0) {
+            String msg = "権限不足: " + joinPermLabels(missing);
+            logManager.writeLog(msg);
+            statusText.setText("ステータス: " + msg);
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+            requestPermissions(missing, PERMISSION_REQUEST_CODE);
         } else {
+            statusText.setText("ステータス: 停止中");
             updateLogDisplay();
         }
+    }
+    
+    private String[] getMissingPermissions() {
+        ArrayList<String> missing = new ArrayList<>();
+        for (String permission : REQUIRED_PERMISSIONS) {
+            if (checkSelfPermission(permission) != PackageManager.PERMISSION_GRANTED) {
+                missing.add(permission);
+            }
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            if (checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+                missing.add(Manifest.permission.POST_NOTIFICATIONS);
+            }
+        }
+        return missing.toArray(new String[0]);
+    }
+    
+    private String permissionLabel(String perm) {
+        if (Manifest.permission.RECORD_AUDIO.equals(perm)) return "録音";
+        if (Manifest.permission.WRITE_EXTERNAL_STORAGE.equals(perm) || Manifest.permission.READ_EXTERNAL_STORAGE.equals(perm)) return "外部ストレージ";
+        if (Manifest.permission.POST_NOTIFICATIONS.equals(perm)) return "通知";
+        return perm;
+    }
+    
+    private String joinPermLabels(String[] perms) {
+        StringBuilder sb = new StringBuilder();
+        for (int i = 0; i < perms.length; i++) {
+            if (i > 0) sb.append(", ");
+            sb.append(permissionLabel(perms[i]));
+        }
+        return sb.toString();
     }
     
     @Override
     public void onRequestPermissionsResult(int requestCode, String[] permissions, int[] grantResults) {
         if (requestCode == PERMISSION_REQUEST_CODE) {
-            boolean allGranted = true;
-            for (int result : grantResults) {
-                if (result != PackageManager.PERMISSION_GRANTED) {
-                    allGranted = false;
-                    break;
+            ArrayList<String> denied = new ArrayList<>();
+            for (int i = 0; i < grantResults.length; i++) {
+                if (grantResults[i] != PackageManager.PERMISSION_GRANTED) {
+                    denied.add(permissions[i]);
                 }
             }
             
-            if (allGranted) {
+            if (denied.isEmpty()) {
                 Toast.makeText(this, "権限が許可されました", Toast.LENGTH_SHORT).show();
+                logManager.writeLog("権限がすべて許可されました");
+                statusText.setText("ステータス: 停止中");
                 updateLogDisplay();
             } else {
-                Toast.makeText(this, "権限が必要です", Toast.LENGTH_LONG).show();
+                String msg = "権限未許可: " + joinPermLabels(denied.toArray(new String[0]));
+                Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+                logManager.writeLog(msg);
+                statusText.setText("ステータス: " + msg);
             }
         }
     }
     
     private void startVoiceListening() {
+        String[] missing = getMissingPermissions();
+        if (missing.length > 0) {
+            String msg = "権限不足のため開始できません: " + joinPermLabels(missing);
+            logManager.writeLog(msg);
+            statusText.setText("ステータス: " + msg);
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+            return;
+        }
+
         Intent serviceIntent = new Intent(this, VoiceListenerService.class);
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

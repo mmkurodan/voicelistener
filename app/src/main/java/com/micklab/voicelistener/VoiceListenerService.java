@@ -31,6 +31,7 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
+import android.content.SharedPreferences;
 
 public class VoiceListenerService extends Service {
     private static final String TAG = "VoiceListenerService";
@@ -48,6 +49,9 @@ public class VoiceListenerService extends Service {
     private static final String VOSK_MODEL_FOLDER = "vosk-model-ja";
     private static final String MODEL_ZIP_URL = "https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip";
 
+    private static final String PREFS_NAME = "VoiceListenerPrefs";
+    private static final String PREF_RMS_THRESHOLD = "rms_threshold";
+
     public static final String ACTION_INSTALL_MODEL = "com.micklab.voicelistener.action.INSTALL_MODEL";
     public static final String EXTRA_MODEL_URL = "com.micklab.voicelistener.extra.MODEL_URL";
     public static final String EXTRA_MODEL_REPLACE = "com.micklab.voicelistener.extra.MODEL_REPLACE";
@@ -57,6 +61,8 @@ public class VoiceListenerService extends Service {
     private OfflineAsrEngine asrEngine;
     private ExecutorService transcriptionExecutor;
     private ExecutorService modelInstallerExecutor;
+    private SharedPreferences sharedPrefs;
+    private SharedPreferences.OnSharedPreferenceChangeListener prefsListener;
 
     private AudioRecord audioRecord;
     private Thread captureThread;
@@ -68,7 +74,26 @@ public class VoiceListenerService extends Service {
         Log.d(TAG, "VoiceListenerService created");
 
         logManager = new LogManager(this);
-        vad = new VoiceActivityDetector(RMS_THRESHOLD, MAX_SILENCE_FRAMES, MIN_SPEECH_FRAMES);
+
+        // VAD閾値は SharedPreferences から取得して初期化する
+        sharedPrefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
+        float prefThreshold = sharedPrefs.getFloat(PREF_RMS_THRESHOLD, (float) RMS_THRESHOLD);
+        vad = new VoiceActivityDetector(prefThreshold, MAX_SILENCE_FRAMES, MIN_SPEECH_FRAMES);
+
+        prefsListener = new SharedPreferences.OnSharedPreferenceChangeListener() {
+            @Override
+            public void onSharedPreferenceChanged(SharedPreferences sharedPreferences, String key) {
+                if (PREF_RMS_THRESHOLD.equals(key)) {
+                    float newVal = sharedPreferences.getFloat(PREF_RMS_THRESHOLD, (float) RMS_THRESHOLD);
+                    if (vad != null) {
+                        vad.setRmsThreshold(newVal);
+                        try { logManager.writeLog("VAD閾値更新: " + newVal); } catch (Exception ignored) {}
+                    }
+                }
+            }
+        };
+        sharedPrefs.registerOnSharedPreferenceChangeListener(prefsListener);
+
         transcriptionExecutor = Executors.newSingleThreadExecutor();
         modelInstallerExecutor = Executors.newSingleThreadExecutor();
 
@@ -118,6 +143,12 @@ public class VoiceListenerService extends Service {
         if (modelInstallerExecutor != null) {
             modelInstallerExecutor.shutdownNow();
             modelInstallerExecutor = null;
+        }
+
+        if (sharedPrefs != null && prefsListener != null) {
+            try { sharedPrefs.unregisterOnSharedPreferenceChangeListener(prefsListener); } catch (Exception ignored) {}
+            prefsListener = null;
+            sharedPrefs = null;
         }
     }
 

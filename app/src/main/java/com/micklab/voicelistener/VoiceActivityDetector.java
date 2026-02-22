@@ -3,7 +3,7 @@ package com.micklab.voicelistener;
 import java.util.ArrayList;
 
 public class VoiceActivityDetector {
-    private final double rmsThreshold;
+    private double rmsThreshold;
     private final int maxSilenceFrames;
     private final int minSpeechFrames;
 
@@ -16,6 +16,14 @@ public class VoiceActivityDetector {
         this.rmsThreshold = rmsThreshold;
         this.maxSilenceFrames = maxSilenceFrames;
         this.minSpeechFrames = minSpeechFrames;
+    }
+
+    public synchronized void setRmsThreshold(double rmsThreshold) {
+        this.rmsThreshold = rmsThreshold;
+    }
+
+    public synchronized double getRmsThreshold() {
+        return this.rmsThreshold;
     }
 
     public synchronized short[] processFrame(short[] frame) {

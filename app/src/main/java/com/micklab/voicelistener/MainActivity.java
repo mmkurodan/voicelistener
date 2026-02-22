@@ -12,6 +12,8 @@ import android.widget.LinearLayout;
 import android.widget.ScrollView;
 import android.widget.TextView;
 import android.widget.Toast;
+import android.widget.SeekBar;
+import android.content.SharedPreferences;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
@@ -70,6 +72,39 @@ public class MainActivity extends Activity {
         logPathText.setPadding(0, 0, 0, 20);
         layout.addView(logPathText);
         
+        // VAD閾値スライダー
+        final int VAD_MIN = 100;
+        final int VAD_MAX = 5000;
+        final SharedPreferences prefs = getSharedPreferences("VoiceListenerPrefs", MODE_PRIVATE);
+        float savedThreshold = prefs.getFloat("rms_threshold", 900.0f);
+        int savedInt = (int) savedThreshold;
+        if (savedInt < VAD_MIN) savedInt = VAD_MIN;
+        if (savedInt > VAD_MAX) savedInt = VAD_MAX;
+
+        final TextView vadLabel = new TextView(this);
+        vadLabel.setText("音声感度 (閾値): " + savedInt);
+        vadLabel.setPadding(0, 10, 0, 10);
+        layout.addView(vadLabel);
+
+        SeekBar vadSeekBar = new SeekBar(this);
+        vadSeekBar.setMax(VAD_MAX - VAD_MIN);
+        vadSeekBar.setProgress(savedInt - VAD_MIN);
+        vadSeekBar.setOnSeekBarChangeListener(new SeekBar.OnSeekBarChangeListener() {
+            @Override
+            public void onProgressChanged(SeekBar seekBar, int progress, boolean fromUser) {
+                int value = progress + VAD_MIN;
+                vadLabel.setText("音声感度 (閾値): " + value);
+                prefs.edit().putFloat("rms_threshold", value).apply();
+            }
+
+            @Override
+            public void onStartTrackingTouch(SeekBar seekBar) {}
+
+            @Override
+            public void onStopTrackingTouch(SeekBar seekBar) {}
+        });
+        layout.addView(vadSeekBar);
+
         // 開始ボタン
         startButton = new Button(this);
         startButton.setText("音声監視開始");

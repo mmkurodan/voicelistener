@@ -18,7 +18,9 @@ jobs:
         echo "$PWD/gradle-8.2.1/bin" >> $GITHUB_PATH
 
     - name: Generate Gradle Wrapper (8.2.1)
-      run: gradle wrapper --gradle-version 8.2.1
+      run: |
+        ZIP="$GITHUB_WORKSPACE/gradle-8.2.1-bin.zip"
+        gradle wrapper --gradle-version 8.2.1 --gradle-distribution-url "file://$ZIP" --stacktrace
 
     - name: Build with Gradle
       run: ./gradlew assembleDebug

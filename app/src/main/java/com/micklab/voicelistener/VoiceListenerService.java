@@ -1,76 +1,95 @@
 package com.micklab.voicelistener;
 
+import android.Manifest;
 import android.app.Notification;
 import android.app.NotificationChannel;
 import android.app.NotificationManager;
 import android.app.PendingIntent;
 import android.app.Service;
 import android.content.Intent;
+import android.content.pm.PackageManager;
+import android.media.AudioFormat;
+import android.media.AudioRecord;
+import android.media.MediaRecorder;
 import android.os.Build;
-import android.os.Bundle;
+import android.os.Environment;
 import android.os.IBinder;
-import android.speech.RecognitionListener;
-import android.speech.RecognizerIntent;
-import android.speech.SpeechRecognizer;
 import android.util.Log;
-import java.util.ArrayList;
-import java.util.Locale;
+import java.io.File;
+import java.util.Arrays;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
-public class VoiceListenerService extends Service implements RecognitionListener {
-    
+public class VoiceListenerService extends Service {
     private static final String TAG = "VoiceListenerService";
     private static final String CHANNEL_ID = "VoiceListenerChannel";
     private static final int NOTIFICATION_ID = 1;
-    
-    private SpeechRecognizer speechRecognizer;
-    private Intent recognizerIntent;
+
+    private static final int SAMPLE_RATE_HZ = 16000;
+    private static final int CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO;
+    private static final int AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT;
+    private static final int FRAME_SAMPLES = 320;
+    private static final int MAX_SILENCE_FRAMES = 15;
+    private static final int MIN_SPEECH_FRAMES = 8;
+    private static final double RMS_THRESHOLD = 900.0;
+
+    private static final String VOSK_MODEL_FOLDER = "vosk-model-ja";
+
     private LogManager logManager;
-    private boolean isListening = false;
-    
+    private VoiceActivityDetector vad;
+    private OfflineAsrEngine asrEngine;
+    private ExecutorService transcriptionExecutor;
+
+    private AudioRecord audioRecord;
+    private Thread captureThread;
+    private volatile boolean isCapturing = false;
+
     @Override
     public void onCreate() {
         super.onCreate();
         Log.d(TAG, "VoiceListenerService created");
-        
-        // ログマネージャーを初期化
+
         logManager = new LogManager(this);
-        
-        // 通知チャンネル作成
+        vad = new VoiceActivityDetector(RMS_THRESHOLD, MAX_SILENCE_FRAMES, MIN_SPEECH_FRAMES);
+        transcriptionExecutor = Executors.newSingleThreadExecutor();
+
         createNotificationChannel();
-        
-        // 音声認識の準備
-        setupSpeechRecognizer();
+        initializeAsrEngine();
     }
-    
+
     @Override
     public int onStartCommand(Intent intent, int flags, int startId) {
         Log.d(TAG, "VoiceListenerService started");
-        
-        // フォアグラウンド通知を開始
+
         startForeground(NOTIFICATION_ID, createNotification());
-        
-        // 音声監視開始
-        startListening();
-        
-        // システムによってサービスが終了されても自動的に再起動
+        startAudioCapture();
+
         return START_STICKY;
     }
-    
+
     @Override
     public void onDestroy() {
         super.onDestroy();
         Log.d(TAG, "VoiceListenerService destroyed");
-        
-        if (speechRecognizer != null) {
-            speechRecognizer.destroy();
+
+        stopAudioCapture();
+
+        if (transcriptionExecutor != null) {
+            transcriptionExecutor.shutdownNow();
+            transcriptionExecutor = null;
+        }
+
+        if (asrEngine != null) {
+            asrEngine.shutdown();
+            asrEngine = null;
         }
     }
-    
+
     @Override
     public IBinder onBind(Intent intent) {
         return null;
     }
-    
+
     private void createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             NotificationChannel channel = new NotificationChannel(
@@ -84,7 +103,7 @@ public class VoiceListenerService extends Service implements RecognitionListener
             manager.createNotificationChannel(channel);
         }
     }
-    
+
     private Notification createNotification() {
         Intent notificationIntent = new Intent(this, MainActivity.class);
         PendingIntent pendingIntent = PendingIntent.getActivity(
@@ -101,119 +120,138 @@ public class VoiceListenerService extends Service implements RecognitionListener
         
         return builder
             .setContentTitle("音声監視中")
-            .setContentText("日本語音声を継続的に監視しています")
+            .setContentText("AudioRecordでオフライン監視を実行中")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build();
     }
-    
-    private void setupSpeechRecognizer() {
-        if (SpeechRecognizer.isRecognitionAvailable(this)) {
-            speechRecognizer = SpeechRecognizer.createSpeechRecognizer(this);
-            speechRecognizer.setRecognitionListener(this);
-            
-            recognizerIntent = new Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH);
-            recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_MODEL, 
-                RecognizerIntent.LANGUAGE_MODEL_FREE_FORM);
-            recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.JAPAN.toLanguageTag());
-            recognizerIntent.putExtra(RecognizerIntent.EXTRA_LANGUAGE_PREFERENCE, Locale.JAPAN.toLanguageTag());
-            recognizerIntent.putExtra(RecognizerIntent.EXTRA_PREFER_OFFLINE, true);
-            recognizerIntent.putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true);
-            recognizerIntent.putExtra(RecognizerIntent.EXTRA_MAX_RESULTS, 1);
-        } else {
-            Log.e(TAG, "音声認識が利用できません");
-        }
-    }
-    
-    private void startListening() {
-        if (speechRecognizer != null && !isListening) {
-            isListening = true;
-            speechRecognizer.startListening(recognizerIntent);
-            Log.d(TAG, "音声監視開始");
-        }
-    }
-    
-    private void restartListening() {
-        if (speechRecognizer != null) {
-            speechRecognizer.cancel();
-            // 短時間待機後に再開
-            new android.os.Handler().postDelayed(() -> {
-                if (!isDestroyed()) {
-                    startListening();
-                }
-            }, 1000);
-        }
-    }
-    
-    private boolean isDestroyed() {
-        // サービスが破棄されているかチェック（簡易版）
-        return speechRecognizer == null;
-    }
-    
-    // RecognitionListener メソッド実装
-    @Override
-    public void onReadyForSpeech(Bundle params) {
-        Log.d(TAG, "音声入力準備完了");
-    }
-    
-    @Override
-    public void onBeginningOfSpeech() {
-        Log.d(TAG, "音声入力開始");
-    }
-    
-    @Override
-    public void onRmsChanged(float rmsdB) {
-        // 音量レベル変化（必要に応じて実装）
-    }
-    
-    @Override
-    public void onBufferReceived(byte[] buffer) {
-        // バッファ受信（必要に応じて実装）
-    }
-    
-    @Override
-    public void onEndOfSpeech() {
-        Log.d(TAG, "音声入力終了");
-        isListening = false;
-    }
-    
-    @Override
-    public void onError(int error) {
-        Log.e(TAG, "音声認識エラー: " + error);
-        isListening = false;
 
-        restartListening();
+    private void initializeAsrEngine() {
+        File documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS);
+        File modelDir = new File(new File(documentsDir, "VoiceListener"), VOSK_MODEL_FOLDER);
+
+        OfflineAsrEngine voskEngine = new VoskOfflineAsrEngine(modelDir.getAbsolutePath());
+        if (voskEngine.initialize()) {
+            asrEngine = voskEngine;
+            Log.i(TAG, "ASR engine: " + asrEngine.name());
+            return;
+        }
+
+        asrEngine = new NoOpOfflineAsrEngine();
+        asrEngine.initialize();
+        Log.w(TAG, "ASR engine fallback: " + asrEngine.name() + " (model missing)");
     }
-    
-    @Override
-    public void onResults(Bundle results) {
-        ArrayList<String> matches = results.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-        if (matches != null && !matches.isEmpty()) {
-            String recognizedText = matches.get(0).trim();
-            Log.d(TAG, "認識結果: " + recognizedText);
-            
-            if (!recognizedText.isEmpty()) {
-                logManager.writeLog("認識: " + recognizedText);
+
+    private void startAudioCapture() {
+        if (isCapturing) {
+            return;
+        }
+        if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
+            Log.e(TAG, "RECORD_AUDIO permission is not granted");
+            stopSelf();
+            return;
+        }
+
+        int minBufferBytes = AudioRecord.getMinBufferSize(SAMPLE_RATE_HZ, CHANNEL_CONFIG, AUDIO_FORMAT);
+        if (minBufferBytes <= 0) {
+            Log.e(TAG, "Failed to get AudioRecord min buffer size: " + minBufferBytes);
+            return;
+        }
+
+        int recordBufferBytes = Math.max(minBufferBytes * 2, FRAME_SAMPLES * 2 * 4);
+        audioRecord = new AudioRecord(
+            MediaRecorder.AudioSource.MIC,
+            SAMPLE_RATE_HZ,
+            CHANNEL_CONFIG,
+            AUDIO_FORMAT,
+            recordBufferBytes
+        );
+
+        if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
+            Log.e(TAG, "AudioRecord initialization failed");
+            audioRecord.release();
+            audioRecord = null;
+            return;
+        }
+
+        try {
+            audioRecord.startRecording();
+        } catch (IllegalStateException | SecurityException e) {
+            Log.e(TAG, "Failed to start recording", e);
+            audioRecord.release();
+            audioRecord = null;
+            return;
+        }
+
+        isCapturing = true;
+        captureThread = new Thread(this::captureLoop, "AudioCaptureThread");
+        captureThread.start();
+        Log.i(TAG, "AudioRecord capture started");
+    }
+
+    private void captureLoop() {
+        short[] readBuffer = new short[FRAME_SAMPLES];
+        while (isCapturing && audioRecord != null) {
+            int readSamples = audioRecord.read(readBuffer, 0, readBuffer.length, AudioRecord.READ_BLOCKING);
+            if (readSamples <= 0) {
+                if (readSamples != AudioRecord.ERROR_INVALID_OPERATION
+                    && readSamples != AudioRecord.ERROR_BAD_VALUE) {
+                    continue;
+                }
+                Log.w(TAG, "AudioRecord read failed: " + readSamples);
+                continue;
+            }
+
+            short[] frame = Arrays.copyOf(readBuffer, readSamples);
+            short[] segment = vad.processFrame(frame);
+            if (segment != null && segment.length > 0) {
+                submitForTranscription(segment);
             }
         }
-        
-        // 継続監視のため再開
-        restartListening();
     }
-    
-    @Override
-    public void onPartialResults(Bundle partialResults) {
-        ArrayList<String> matches = partialResults.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION);
-        if (matches != null && !matches.isEmpty()) {
-            String partialText = matches.get(0);
-            Log.d(TAG, "部分認識: " + partialText);
-            // 部分結果は必要に応じてログ記録
+
+    private void submitForTranscription(short[] segment) {
+        if (transcriptionExecutor == null) {
+            return;
         }
+        transcriptionExecutor.execute(() -> {
+            String recognizedText = asrEngine == null ? null : asrEngine.transcribe(segment, SAMPLE_RATE_HZ);
+            if (recognizedText != null && !recognizedText.trim().isEmpty()) {
+                logManager.writeLog("認識: " + recognizedText.trim());
+            }
+        });
     }
-    
-    @Override
-    public void onEvent(int eventType, Bundle params) {
-        // イベント処理（必要に応じて実装）
+
+    private void stopAudioCapture() {
+        isCapturing = false;
+
+        if (captureThread != null) {
+            try {
+                captureThread.join(500);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            captureThread = null;
+        }
+
+        if (audioRecord != null) {
+            try {
+                if (audioRecord.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) {
+                    audioRecord.stop();
+                }
+            } catch (IllegalStateException e) {
+                Log.w(TAG, "AudioRecord stop failed", e);
+            }
+            audioRecord.release();
+            audioRecord = null;
+        }
+
+        if (vad != null) {
+            short[] flushed = vad.flush();
+            if (flushed != null && flushed.length > 0) {
+                submitForTranscription(flushed);
+            }
+        }
     }
 }

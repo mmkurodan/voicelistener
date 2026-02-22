@@ -31,7 +31,7 @@ public class MainActivity extends Activity {
     private Button stopButton;
     private TextView statusText;
     private TextView logPathText;
-    private TextView logContentText;
+    private EditText logContentText;
     private ScrollView logScrollView;
     private LogManager logManager;
     private boolean isServiceRunning = false;
@@ -170,11 +170,18 @@ public class MainActivity extends Activity {
         logLabel.setPadding(0, 20, 0, 10);
         layout.addView(logLabel);
         
-        logContentText = new TextView(this);
+        logContentText = new EditText(this);
         logContentText.setTextSize(10);
         logContentText.setBackgroundColor(0xFF000000);
         logContentText.setTextColor(0xFF00FF00);
         logContentText.setPadding(10, 10, 10, 10);
+        // 非編集モードで選択とコピーを許可
+        logContentText.setKeyListener(null);
+        logContentText.setFocusable(false);
+        logContentText.setCursorVisible(false);
+        logContentText.setLongClickable(true);
+        logContentText.setTextIsSelectable(true);
+        logContentText.setHorizontallyScrolling(false);
         
         logScrollView = new ScrollView(this);
         logScrollView.addView(logContentText);

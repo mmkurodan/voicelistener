@@ -43,9 +43,13 @@ public class LogManager {
     }
     
     private File getLogFolder() {
-        // 外部ストレージのDocumentsフォルダ内にVoiceListenerフォルダを作成
-        File documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS);
-        return new File(documentsDir, LOG_FOLDER);
+        // Use app-specific external files dir for Documents with fallback to internal files dir
+        File externalDocs = context.getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS);
+        if (externalDocs != null) {
+            return new File(externalDocs, LOG_FOLDER);
+        } else {
+            return new File(context.getFilesDir(), LOG_FOLDER);
+        }
     }
     
     public void writeLog(String message) {

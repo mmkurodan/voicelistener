@@ -152,9 +152,6 @@ public class VoiceListenerService extends Service {
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             missing.add(Manifest.permission.RECORD_AUDIO);
         }
-        if (checkSelfPermission(Manifest.permission.WRITE_EXTERNAL_STORAGE) != PackageManager.PERMISSION_GRANTED) {
-            missing.add(Manifest.permission.WRITE_EXTERNAL_STORAGE);
-        }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
             missing.add(Manifest.permission.POST_NOTIFICATIONS);
         }
@@ -165,7 +162,7 @@ public class VoiceListenerService extends Service {
                 if (i > 0) sb.append(", ");
                 String p = missing.get(i);
                 if (Manifest.permission.RECORD_AUDIO.equals(p)) sb.append("録音");
-                else if (Manifest.permission.WRITE_EXTERNAL_STORAGE.equals(p) || Manifest.permission.READ_EXTERNAL_STORAGE.equals(p)) sb.append("外部ストレージ");
+                else if (Manifest.permission.READ_EXTERNAL_STORAGE.equals(p)) sb.append("外部ストレージ");
                 else if (Manifest.permission.POST_NOTIFICATIONS.equals(p)) sb.append("通知");
                 else sb.append(p);
             }

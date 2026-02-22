@@ -91,7 +91,7 @@ public class MainActivity extends Activity {
 
         // モデル入れ替えボタン
         Button replaceModelButton = new Button(this);
-        replaceModelButton.setText("モデル入れ替え");
+        replaceModelButton.setText("モデルロード");
         replaceModelButton.setOnClickListener(v -> {
             String url = urlInput.getText().toString().trim();
             if (url.isEmpty()) {
@@ -107,7 +107,7 @@ public class MainActivity extends Activity {
             } else {
                 startService(intent);
             }
-            Toast.makeText(this, "モデル入れ替えを開始しました", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "モデルロードを開始しました", Toast.LENGTH_SHORT).show();
         });
         layout.addView(replaceModelButton);
 

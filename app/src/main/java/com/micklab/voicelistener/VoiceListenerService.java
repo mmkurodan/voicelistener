@@ -82,17 +82,19 @@ public class VoiceListenerService extends Service {
 
         startForeground(NOTIFICATION_ID, createNotification());
 
-        // intent がモデルインストール要求を含む場合は先に処理する
-        if (intent != null && ACTION_INSTALL_MODEL.equals(intent.getAction())) {
+        // intent がモデルインストール要求を含む場合は先に処理する（認識は開始しない）
+        String action = intent != null ? intent.getAction() : null;
+        if (ACTION_INSTALL_MODEL.equals(action)) {
             String url = intent.getStringExtra(EXTRA_MODEL_URL);
             boolean replace = intent.getBooleanExtra(EXTRA_MODEL_REPLACE, true);
             File documentsDir = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS);
             if (documentsDir == null) documentsDir = getFilesDir();
             File modelDir = new File(new File(documentsDir, "VoiceListener"), VOSK_MODEL_FOLDER);
-            installModelFromUrlAsync(modelDir, (url == null || url.isEmpty()) ? MODEL_ZIP_URL : url, replace);
+            installModelFromUrlAsync(modelDir, (url == null || url.isEmpty()) ? MODEL_ZIP_URL : url, replace, true);
+            // モデルインストールリクエスト時は音声認識はここで開始しない
+        } else {
+            startAudioCapture();
         }
-
-        startAudioCapture();
 
         return START_STICKY;
     }
@@ -183,10 +185,10 @@ public class VoiceListenerService extends Service {
     }
 
     private void installModelIfMissingAsync(File modelDir) {
-        installModelFromUrlAsync(modelDir, MODEL_ZIP_URL, false);
+        installModelFromUrlAsync(modelDir, MODEL_ZIP_URL, false, false);
     }
 
-    private void installModelFromUrlAsync(File modelDir, String url, boolean replace) {
+    private void installModelFromUrlAsync(File modelDir, String url, boolean replace, boolean stopServiceOnFinish) {
         if (!replace && modelDir.exists() && modelDir.isDirectory() && modelDir.listFiles() != null && modelDir.listFiles().length > 0) {
             // 既に存在する
             return;
@@ -210,6 +212,7 @@ public class VoiceListenerService extends Service {
                 boolean dlOk = downloadFile(url, cacheZip);
                 if (!dlOk) {
                     logManager.writeLog("モデルダウンロード失敗");
+                    if (stopServiceOnFinish) stopSelf();
                     return;
                 }
 
@@ -217,6 +220,7 @@ public class VoiceListenerService extends Service {
                 boolean unzipOk = unzipToDir(cacheZip, extractDir);
                 if (!unzipOk) {
                     logManager.writeLog("モデル解凍失敗");
+                    if (stopServiceOnFinish) stopSelf();
                     return;
                 }
 
@@ -224,6 +228,7 @@ public class VoiceListenerService extends Service {
                 if (!modelDir.exists()) {
                     if (!modelDir.mkdirs()) {
                         logManager.writeLog("モデルフォルダ作成失敗: " + modelDir.getAbsolutePath());
+                        if (stopServiceOnFinish) stopSelf();
                         return;
                     }
                 }
@@ -238,6 +243,7 @@ public class VoiceListenerService extends Service {
                 boolean copyOk = copyDirectory(source, modelDir);
                 if (!copyOk) {
                     logManager.writeLog("モデルコピー失敗");
+                    if (stopServiceOnFinish) stopSelf();
                     return;
                 }
 
@@ -262,6 +268,10 @@ public class VoiceListenerService extends Service {
             } catch (Exception e) {
                 try { logManager.writeLog("モデル取得中に例外発生: " + e.getMessage()); } catch (Exception ignored) {}
                 Log.e(TAG, "モデル取得例外", e);
+            } finally {
+                if (stopServiceOnFinish) {
+                    try { stopSelf(); } catch (Exception ignored) {}
+                }
             }
         });
     }

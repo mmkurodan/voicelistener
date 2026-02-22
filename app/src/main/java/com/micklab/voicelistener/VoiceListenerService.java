@@ -15,11 +15,22 @@ import android.os.Build;
 import android.os.Environment;
 import android.os.IBinder;
 import android.util.Log;
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
+import java.io.IOException;
+import java.io.InputStream;
+import java.io.OutputStream;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 public class VoiceListenerService extends Service {
     private static final String TAG = "VoiceListenerService";
@@ -35,11 +46,13 @@ public class VoiceListenerService extends Service {
     private static final double RMS_THRESHOLD = 900.0;
 
     private static final String VOSK_MODEL_FOLDER = "vosk-model-ja";
+    private static final String MODEL_ZIP_URL = "https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip";
 
     private LogManager logManager;
     private VoiceActivityDetector vad;
     private OfflineAsrEngine asrEngine;
     private ExecutorService transcriptionExecutor;
+    private ExecutorService modelInstallerExecutor;
 
     private AudioRecord audioRecord;
     private Thread captureThread;
@@ -53,6 +66,7 @@ public class VoiceListenerService extends Service {
         logManager = new LogManager(this);
         vad = new VoiceActivityDetector(RMS_THRESHOLD, MAX_SILENCE_FRAMES, MIN_SPEECH_FRAMES);
         transcriptionExecutor = Executors.newSingleThreadExecutor();
+        modelInstallerExecutor = Executors.newSingleThreadExecutor();
 
         createNotificationChannel();
         initializeAsrEngine();
@@ -83,6 +97,10 @@ public class VoiceListenerService extends Service {
         if (asrEngine != null) {
             asrEngine.shutdown();
             asrEngine = null;
+        }
+        if (modelInstallerExecutor != null) {
+            modelInstallerExecutor.shutdownNow();
+            modelInstallerExecutor = null;
         }
     }
 
@@ -142,11 +160,196 @@ public class VoiceListenerService extends Service {
             return;
         }
 
+        // モデルがないためフォールバックし、非同期でモデル取得を試みる
         asrEngine = new NoOpOfflineAsrEngine();
         asrEngine.initialize();
         Log.w(TAG, "ASR engine fallback: " + asrEngine.name() + " (model missing)");
+        installModelIfMissingAsync(modelDir);
     }
 
+    private void installModelIfMissingAsync(File modelDir) {
+        if (modelDir.exists() && modelDir.isDirectory() && modelDir.listFiles() != null && modelDir.listFiles().length > 0) {
+            // 既に存在する
+            return;
+        }
+        if (modelInstallerExecutor == null) {
+            modelInstallerExecutor = Executors.newSingleThreadExecutor();
+        }
+        modelInstallerExecutor.execute(() -> {
+            try {
+                logManager.writeLog("モデル未検出: ダウンロードを開始します");
+            } catch (Exception e) {
+                Log.w(TAG, "ログ書き込み失敗", e);
+            }
+
+            File cacheZip = new File(getCacheDir(), "vosk_model.zip");
+            File extractDir = new File(getCacheDir(), "vosk_model_extract");
+            try {
+                boolean dlOk = downloadFile(MODEL_ZIP_URL, cacheZip);
+                if (!dlOk) {
+                    logManager.writeLog("モデルダウンロード失敗");
+                    return;
+                }
+
+                // 解凍
+                boolean unzipOk = unzipToDir(cacheZip, extractDir);
+                if (!unzipOk) {
+                    logManager.writeLog("モデル解凍失敗");
+                    return;
+                }
+
+                // コピー先を作成
+                if (!modelDir.exists()) {
+                    if (!modelDir.mkdirs()) {
+                        logManager.writeLog("モデルフォルダ作成失敗: " + modelDir.getAbsolutePath());
+                        return;
+                    }
+                }
+
+                // 解凍先の構造により中身をmodelDirへコピー
+                File[] children = extractDir.listFiles();
+                File source = extractDir;
+                if (children != null && children.length == 1 && children[0].isDirectory()) {
+                    source = children[0];
+                }
+
+                boolean copyOk = copyDirectory(source, modelDir);
+                if (!copyOk) {
+                    logManager.writeLog("モデルコピー失敗");
+                    return;
+                }
+
+                // クリーンアップ
+                deleteRecursively(cacheZip);
+                deleteRecursively(extractDir);
+
+                logManager.writeLog("モデル取得・展開完了: " + modelDir.getAbsolutePath());
+
+                // 再初期化
+                OfflineAsrEngine newEngine = new VoskOfflineAsrEngine(modelDir.getAbsolutePath());
+                if (newEngine.initialize()) {
+                    if (asrEngine != null) {
+                        try { asrEngine.shutdown(); } catch (Exception ignored) {}
+                    }
+                    asrEngine = newEngine;
+                    logManager.writeLog("ASRエンジン初期化成功: " + asrEngine.name());
+                } else {
+                    logManager.writeLog("ASRエンジン初期化失敗");
+                }
+
+            } catch (Exception e) {
+                try { logManager.writeLog("モデル取得中に例外発生: " + e.getMessage()); } catch (Exception ignored) {}
+                Log.e(TAG, "モデル取得例外", e);
+            }
+        });
+    }
+
+    private boolean downloadFile(String urlStr, File destination) {
+        InputStream in = null;
+        OutputStream out = null;
+        HttpURLConnection conn = null;
+        try {
+            URL url = new URL(urlStr);
+            conn = (HttpURLConnection) url.openConnection();
+            conn.setConnectTimeout(15000);
+            conn.setReadTimeout(30000);
+            conn.setInstanceFollowRedirects(true);
+            conn.connect();
+            if (conn.getResponseCode() / 100 != 2) {
+                Log.e(TAG, "Download failed, HTTP code: " + conn.getResponseCode());
+                return false;
+            }
+
+            in = new BufferedInputStream(conn.getInputStream());
+            out = new BufferedOutputStream(new FileOutputStream(destination));
+            byte[] buffer = new byte[8192];
+            int len;
+            while ((len = in.read(buffer)) != -1) {
+                out.write(buffer, 0, len);
+            }
+            out.flush();
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "downloadFile error", e);
+            return false;
+        } finally {
+            try { if (in != null) in.close(); } catch (IOException ignored) {}
+            try { if (out != null) out.close(); } catch (IOException ignored) {}
+            if (conn != null) conn.disconnect();
+        }
+    }
+
+    private boolean unzipToDir(File zipFile, File outDir) {
+        ZipInputStream zis = null;
+        try {
+            if (outDir.exists()) deleteRecursively(outDir);
+            outDir.mkdirs();
+            zis = new ZipInputStream(new BufferedInputStream(new FileInputStream(zipFile)));
+            ZipEntry entry;
+            byte[] buffer = new byte[8192];
+            while ((entry = zis.getNextEntry()) != null) {
+                File outFile = new File(outDir, entry.getName());
+                if (entry.isDirectory()) {
+                    outFile.mkdirs();
+                } else {
+                    File parent = outFile.getParentFile();
+                    if (parent != null && !parent.exists()) parent.mkdirs();
+                    try (FileOutputStream fos = new FileOutputStream(outFile)) {
+                        int count;
+                        while ((count = zis.read(buffer)) != -1) {
+                            fos.write(buffer, 0, count);
+                        }
+                        fos.flush();
+                    }
+                }
+                zis.closeEntry();
+            }
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "unzipToDir error", e);
+            return false;
+        } finally {
+            try { if (zis != null) zis.close(); } catch (IOException ignored) {}
+        }
+    }
+
+    private boolean copyDirectory(File src, File dst) {
+        if (src.isDirectory()) {
+            if (!dst.exists() && !dst.mkdirs()) return false;
+            File[] files = src.listFiles();
+            if (files == null) return true;
+            for (File f : files) {
+                File destFile = new File(dst, f.getName());
+                if (!copyDirectory(f, destFile)) return false;
+            }
+            return true;
+        } else {
+            try (InputStream in = new FileInputStream(src);
+                 OutputStream out = new FileOutputStream(dst)) {
+                byte[] buf = new byte[8192];
+                int len;
+                while ((len = in.read(buf)) != -1) {
+                    out.write(buf, 0, len);
+                }
+                out.flush();
+                return true;
+            } catch (IOException e) {
+                Log.e(TAG, "copyDirectory file error", e);
+                return false;
+            }
+        }
+    }
+
+    private void deleteRecursively(File f) {
+        if (f == null || !f.exists()) return;
+        if (f.isDirectory()) {
+            File[] children = f.listFiles();
+            if (children != null) {
+                for (File c : children) deleteRecursively(c);
+            }
+        }
+        try { f.delete(); } catch (Exception ignored) {}
+    }
     private void startAudioCapture() {
         if (isCapturing) {
             return;

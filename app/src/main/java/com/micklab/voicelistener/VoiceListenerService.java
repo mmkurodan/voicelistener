@@ -129,7 +129,10 @@ public class VoiceListenerService extends Service {
     }
 
     private void initializeAsrEngine() {
-        File documentsDir = Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_DOCUMENTS);
+        File documentsDir = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS);
+        if (documentsDir == null) {
+            documentsDir = getFilesDir();
+        }
         File modelDir = new File(new File(documentsDir, "VoiceListener"), VOSK_MODEL_FOLDER);
 
         OfflineAsrEngine voskEngine = new VoskOfflineAsrEngine(modelDir.getAbsolutePath());
@@ -162,7 +165,6 @@ public class VoiceListenerService extends Service {
                 if (i > 0) sb.append(", ");
                 String p = missing.get(i);
                 if (Manifest.permission.RECORD_AUDIO.equals(p)) sb.append("録音");
-                else if (Manifest.permission.READ_EXTERNAL_STORAGE.equals(p)) sb.append("外部ストレージ");
                 else if (Manifest.permission.POST_NOTIFICATIONS.equals(p)) sb.append("通知");
                 else sb.append(p);
             }

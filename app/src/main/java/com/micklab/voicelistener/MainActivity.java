@@ -21,8 +21,7 @@ public class MainActivity extends Activity {
     
     private static final int PERMISSION_REQUEST_CODE = 100;
     private static final String[] REQUIRED_PERMISSIONS = {
-        Manifest.permission.RECORD_AUDIO,
-        Manifest.permission.READ_EXTERNAL_STORAGE
+        Manifest.permission.RECORD_AUDIO
     };
     
     private Button startButton;
@@ -142,7 +141,6 @@ public class MainActivity extends Activity {
     
     private String permissionLabel(String perm) {
         if (Manifest.permission.RECORD_AUDIO.equals(perm)) return "録音";
-        if (Manifest.permission.READ_EXTERNAL_STORAGE.equals(perm)) return "外部ストレージ";
         if (Manifest.permission.POST_NOTIFICATIONS.equals(perm)) return "通知";
         return perm;
     }

@@ -303,12 +303,19 @@ public class MainActivity extends Activity {
     }
     
     private void stopVoiceListening() {
-        // UI上の監視表示を停止するが、バックグラウンドの音声認識とログ出力は継続させる
-        // 既存の stopService を呼ばないことでサービスは存続する
+        // 録音を停止し、保留の音声断片に対する認識とログ書き出しのみ続けたのちにサービスを停止する
+        Intent serviceIntent = new Intent(this, VoiceListenerService.class);
+        serviceIntent.setAction(VoiceListenerService.ACTION_STOP_MONITORING);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(serviceIntent);
+        } else {
+            startService(serviceIntent);
+        }
+
         isServiceRunning = false;
         updateButtons();
-        updateStatus();
-        Toast.makeText(this, "UI上の監視を停止しました（バックグラウンドは継続）", Toast.LENGTH_SHORT).show();
+        statusText.setText("ステータス: 停止中（保留処理中）");
+        Toast.makeText(this, "録音を停止しました。保留処理完了後にサービスが停止します。", Toast.LENGTH_SHORT).show();
     }
     
     private void updateButtons() {

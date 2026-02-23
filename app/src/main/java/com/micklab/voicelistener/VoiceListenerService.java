@@ -29,6 +29,7 @@ import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import android.content.SharedPreferences;
@@ -53,6 +54,7 @@ public class VoiceListenerService extends Service {
     private static final String PREF_RMS_THRESHOLD = "rms_threshold";
 
     public static final String ACTION_INSTALL_MODEL = "com.micklab.voicelistener.action.INSTALL_MODEL";
+    public static final String ACTION_STOP_MONITORING = "com.micklab.voicelistener.action.STOP_MONITORING";
     public static final String EXTRA_MODEL_URL = "com.micklab.voicelistener.extra.MODEL_URL";
     public static final String EXTRA_MODEL_REPLACE = "com.micklab.voicelistener.extra.MODEL_REPLACE";
 
@@ -107,7 +109,7 @@ public class VoiceListenerService extends Service {
 
         startForeground(NOTIFICATION_ID, createNotification());
 
-        // intent がモデルインストール要求を含む場合は先に処理する（認識は開始しない）
+        // intent がモデルインストール要求または停止要求を含む場合は先に処理する
         String action = intent != null ? intent.getAction() : null;
         if (ACTION_INSTALL_MODEL.equals(action)) {
             String url = intent.getStringExtra(EXTRA_MODEL_URL);
@@ -117,6 +119,31 @@ public class VoiceListenerService extends Service {
             File modelDir = new File(new File(documentsDir, "VoiceListener"), VOSK_MODEL_FOLDER);
             installModelFromUrlAsync(modelDir, (url == null || url.isEmpty()) ? MODEL_ZIP_URL : url, replace, true);
             // モデルインストールリクエスト時は音声認識はここで開始しない
+        } else if (ACTION_STOP_MONITORING.equals(action)) {
+            // UIの停止要求: 録音は停止し、既にキューに入っている処理を完了したらサービスを終了する
+            try { if (logManager != null) logManager.writeLog("監視停止要求を受信: 録音を停止し、保留処理完了後に終了します"); } catch (Exception ignored) {}
+            stopAudioCapture();
+            if (transcriptionExecutor != null) {
+                if (modelInstallerExecutor == null) modelInstallerExecutor = Executors.newSingleThreadExecutor();
+                modelInstallerExecutor.execute(() -> {
+                    try {
+                        transcriptionExecutor.shutdown();
+                        boolean terminated = transcriptionExecutor.awaitTermination(120, TimeUnit.SECONDS);
+                        if (!terminated) {
+                            transcriptionExecutor.shutdownNow();
+                        }
+                    } catch (InterruptedException e) {
+                        Thread.currentThread().interrupt();
+                        try { if (logManager != null) logManager.writeLog("監視停止待機中に割込: " + e.getMessage()); } catch (Exception ignored) {}
+                    } finally {
+                        try { if (logManager != null) logManager.writeLog("保留処理完了、サービスを停止します"); } catch (Exception ignored) {}
+                        stopSelf();
+                    }
+                });
+            } else {
+                try { if (logManager != null) logManager.writeLog("保留処理なし、サービスを停止します"); } catch (Exception ignored) {}
+                stopSelf();
+            }
         } else {
             startAudioCapture();
         }

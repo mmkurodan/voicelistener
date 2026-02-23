@@ -52,6 +52,10 @@ public class VoiceListenerService extends Service {
 
     private static final String PREFS_NAME = "VoiceListenerPrefs";
     private static final String PREF_RMS_THRESHOLD = "rms_threshold";
+    private static final String PREF_MON_STATE = "monitor_state";
+    private static final String MON_STATE_RUNNING = "running";
+    private static final String MON_STATE_PENDING = "pending";
+    private static final String MON_STATE_STOPPED = "stopped";
 
     public static final String ACTION_INSTALL_MODEL = "com.micklab.voicelistener.action.INSTALL_MODEL";
     public static final String ACTION_STOP_MONITORING = "com.micklab.voicelistener.action.STOP_MONITORING";
@@ -122,6 +126,8 @@ public class VoiceListenerService extends Service {
         } else if (ACTION_STOP_MONITORING.equals(action)) {
             // UIの停止要求: 録音は停止し、既にキューに入っている処理を完了したらサービスを終了する
             try { if (logManager != null) logManager.writeLog("監視停止要求を受信: 録音を停止し、保留処理完了後に終了します"); } catch (Exception ignored) {}
+            // set pending state
+            try { if (sharedPrefs != null) sharedPrefs.edit().putString(PREF_MON_STATE, MON_STATE_PENDING).apply(); } catch (Exception ignored) {}
             stopAudioCapture();
             if (transcriptionExecutor != null) {
                 if (modelInstallerExecutor == null) modelInstallerExecutor = Executors.newSingleThreadExecutor();
@@ -137,11 +143,14 @@ public class VoiceListenerService extends Service {
                         try { if (logManager != null) logManager.writeLog("監視停止待機中に割込: " + e.getMessage()); } catch (Exception ignored) {}
                     } finally {
                         try { if (logManager != null) logManager.writeLog("保留処理完了、サービスを停止します"); } catch (Exception ignored) {}
+                        // set stopped state
+                        try { if (sharedPrefs != null) sharedPrefs.edit().putString(PREF_MON_STATE, MON_STATE_STOPPED).apply(); } catch (Exception ignored) {}
                         stopSelf();
                     }
                 });
             } else {
                 try { if (logManager != null) logManager.writeLog("保留処理なし、サービスを停止します"); } catch (Exception ignored) {}
+                try { if (sharedPrefs != null) sharedPrefs.edit().putString(PREF_MON_STATE, MON_STATE_STOPPED).apply(); } catch (Exception ignored) {}
                 stopSelf();
             }
         } else {
@@ -171,6 +180,9 @@ public class VoiceListenerService extends Service {
             modelInstallerExecutor.shutdownNow();
             modelInstallerExecutor = null;
         }
+
+        // ensure state is stopped
+        try { if (sharedPrefs != null) sharedPrefs.edit().putString(PREF_MON_STATE, MON_STATE_STOPPED).apply(); } catch (Exception ignored) {}
 
         if (sharedPrefs != null && prefsListener != null) {
             try { sharedPrefs.unregisterOnSharedPreferenceChangeListener(prefsListener); } catch (Exception ignored) {}
@@ -508,6 +520,9 @@ public class VoiceListenerService extends Service {
         captureThread = new Thread(this::captureLoop, "AudioCaptureThread");
         captureThread.start();
         Log.i(TAG, "AudioRecord capture started");
+        // set running state
+        try { if (sharedPrefs != null) sharedPrefs.edit().putString(PREF_MON_STATE, MON_STATE_RUNNING).apply(); } catch (Exception ignored) {}
+        try { if (logManager != null) logManager.writeLog("録音開始"); } catch (Exception ignored) {}
     }
 
     private void captureLoop() {

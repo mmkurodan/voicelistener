@@ -45,12 +45,18 @@ public class MainActivity extends Activity {
 
     private LogManager logManager;
     private boolean isServiceRunning = false;
+    private SharedPreferences prefs;
+    private static final String PREF_MON_STATE = "monitor_state";
+    private static final String MON_STATE_RUNNING = "running";
+    private static final String MON_STATE_PENDING = "pending";
+    private static final String MON_STATE_STOPPED = "stopped";
     
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
         logManager = new LogManager(this);
+        prefs = getSharedPreferences("VoiceListenerPrefs", MODE_PRIVATE);
         
         createUI();
         checkPermissions();
@@ -92,7 +98,6 @@ public class MainActivity extends Activity {
         // VAD閾値スライダー
         final int VAD_MIN = 100;
         final int VAD_MAX = 5000;
-        final SharedPreferences prefs = getSharedPreferences("VoiceListenerPrefs", MODE_PRIVATE);
         float savedThreshold = prefs.getFloat("rms_threshold", 900.0f);
         int savedInt = (int) savedThreshold;
         if (savedInt < VAD_MIN) savedInt = VAD_MIN;
@@ -324,7 +329,27 @@ public class MainActivity extends Activity {
     }
     
     private void updateStatus() {
-        statusText.setText("ステータス: " + (isServiceRunning ? "監視中" : "停止中"));
+        updateStatusFromPrefs();
+    }
+
+    private void updateStatusFromPrefs() {
+        String state = prefs.getString(PREF_MON_STATE, null);
+        if (state == null) {
+            state = isServiceRunning ? MON_STATE_RUNNING : MON_STATE_STOPPED;
+        }
+        String display;
+        if (MON_STATE_RUNNING.equals(state)) {
+            display = "監視中";
+            isServiceRunning = true;
+        } else if (MON_STATE_PENDING.equals(state)) {
+            display = "停止中（保留処理中）";
+            isServiceRunning = false;
+        } else {
+            display = "停止中";
+            isServiceRunning = false;
+        }
+        statusText.setText("ステータス: " + display);
+        updateButtons();
     }
     
     private void updateLogDisplay() {
@@ -362,8 +387,33 @@ public class MainActivity extends Activity {
                 }
 
                 StringBuilder logContent = new StringBuilder();
+                String lastMinute = null;
                 for (String l : deque) {
-                    logContent.append(l).append('\n');
+                    String minute = null;
+                    String msg = l;
+                    if (l.startsWith("[") && l.contains("]")) {
+                        int end = l.indexOf(']');
+                        if (end > 1) {
+                            String ts = l.substring(1, end);
+                            if (ts.length() >= 16) {
+                                try { minute = ts.substring(11, 16); } catch (Exception ignored) { minute = ts; }
+                            } else {
+                                minute = ts;
+                            }
+                            if (l.length() > end + 2) msg = l.substring(end + 2).trim(); else msg = "";
+                        }
+                    }
+
+                    // 認識プレフィックスを削除
+                    msg = msg.replaceFirst("^認識[:：]\\s*", "");
+
+                    if (minute != null) {
+                        if (!minute.equals(lastMinute)) {
+                            logContent.append("[").append(minute).append("] ");
+                            lastMinute = minute;
+                        }
+                    }
+                    logContent.append(msg).append('\n');
                 }
 
                 logContentText.setText(logContent.toString());
@@ -398,6 +448,7 @@ public class MainActivity extends Activity {
                 public void run() {
                     try {
                         updateLogDisplay();
+                        updateStatusFromPrefs();
                     } catch (Exception ignored) {}
                     uiHandler.postDelayed(this, UPDATE_INTERVAL_MS);
                 }

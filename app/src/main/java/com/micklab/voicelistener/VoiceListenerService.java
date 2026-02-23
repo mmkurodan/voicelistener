@@ -62,7 +62,7 @@ public class VoiceListenerService extends Service {
     public static final String EXTRA_MODEL_URL = "com.micklab.voicelistener.extra.MODEL_URL";
     public static final String EXTRA_MODEL_REPLACE = "com.micklab.voicelistener.extra.MODEL_REPLACE";
 
-    private LogManager logManager;
+    private LogManager2 logManager;
     private VoiceActivityDetector vad;
     private OfflineAsrEngine asrEngine;
     private ExecutorService transcriptionExecutor;
@@ -79,7 +79,7 @@ public class VoiceListenerService extends Service {
         super.onCreate();
         Log.d(TAG, "VoiceListenerService created");
 
-        logManager = new LogManager(this);
+        logManager = new LogManager2(this);
 
         // VAD閾値は SharedPreferences から取得して初期化する
         sharedPrefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -125,7 +125,7 @@ public class VoiceListenerService extends Service {
             // モデルインストールリクエスト時は音声認識はここで開始しない
         } else if (ACTION_STOP_MONITORING.equals(action)) {
             // UIの停止要求: 録音は停止し、既にキューに入っている処理を完了したらサービスを終了する
-            try { if (logManager != null) logManager.writeLog("監視停止要求を受信: 録音を停止し、保留処理完了後に終了します"); } catch (Exception ignored) {}
+            try { if (logManager != null) logManager.writeLog("監視停止要求を受信: 録音を停止し、保留処理完了後に終了します", false); } catch (Exception ignored) {}
             // set pending state
             try { if (sharedPrefs != null) sharedPrefs.edit().putString(PREF_MON_STATE, MON_STATE_PENDING).apply(); } catch (Exception ignored) {}
             stopAudioCapture();
@@ -140,16 +140,16 @@ public class VoiceListenerService extends Service {
                         }
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
-                        try { if (logManager != null) logManager.writeLog("監視停止待機中に割込: " + e.getMessage()); } catch (Exception ignored) {}
+                        try { if (logManager != null) logManager.writeLog("監視停止待機中に割込: " + e.getMessage(), false); } catch (Exception ignored) {}
                     } finally {
-                        try { if (logManager != null) logManager.writeLog("保留処理完了、サービスを停止します"); } catch (Exception ignored) {}
+                        try { if (logManager != null) logManager.writeLog("保留処理完了、サービスを停止します", false); } catch (Exception ignored) {}
                         // set stopped state
                         try { if (sharedPrefs != null) sharedPrefs.edit().putString(PREF_MON_STATE, MON_STATE_STOPPED).apply(); } catch (Exception ignored) {}
                         stopSelf();
                     }
                 });
             } else {
-                try { if (logManager != null) logManager.writeLog("保留処理なし、サービスを停止します"); } catch (Exception ignored) {}
+                try { if (logManager != null) logManager.writeLog("保留処理なし、サービスを停止します", false); } catch (Exception ignored) {}
                 try { if (sharedPrefs != null) sharedPrefs.edit().putString(PREF_MON_STATE, MON_STATE_STOPPED).apply(); } catch (Exception ignored) {}
                 stopSelf();
             }

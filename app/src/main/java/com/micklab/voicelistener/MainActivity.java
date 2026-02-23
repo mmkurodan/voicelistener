@@ -43,7 +43,7 @@ public class MainActivity extends Activity {
     private Runnable periodicUpdateRunnable;
     private static final int UPDATE_INTERVAL_MS = 5000; // 5s
 
-    private LogManager logManager;
+    private LogManager2 logManager;
     private boolean isServiceRunning = false;
     private SharedPreferences prefs;
     private static final String PREF_MON_STATE = "monitor_state";
@@ -55,7 +55,7 @@ public class MainActivity extends Activity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
         
-        logManager = new LogManager(this);
+        logManager = new LogManager2(this);
         prefs = getSharedPreferences("VoiceListenerPrefs", MODE_PRIVATE);
         
         createUI();

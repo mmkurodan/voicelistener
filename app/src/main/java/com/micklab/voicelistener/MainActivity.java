@@ -43,8 +43,6 @@ public class MainActivity extends Activity {
     private Button startButton;
     private Button stopButton;
     private TextView statusText;
-    private TextView logPathText;
-    private TextView fileMetaText;
     private EditText logContentText;
     private ScrollView logScrollView;
 
@@ -53,7 +51,6 @@ public class MainActivity extends Activity {
     private Runnable indicatorUpdateRunnable;
     private static final int UPDATE_INTERVAL_MS = 5000; // 5s
     private static final int INDICATOR_UPDATE_INTERVAL_MS = 250;
-    private static final int MODEL_LIST_REFRESH_INTERVAL_MS = 2000;
     private static final int VAD_MIN = 100;
     private static final int VAD_MAX = 5000;
 
@@ -76,7 +73,7 @@ public class MainActivity extends Activity {
     private TextView modelDownloadProgressText;
     private SeekBar volumeIndicatorSeekBar;
     private TextView volumeIndicatorLabel;
-    private long lastModelListRefreshMs = 0L;
+    private boolean wasModelDownloadActive = false;
     
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -94,33 +91,12 @@ public class MainActivity extends Activity {
         layout.setOrientation(LinearLayout.VERTICAL);
         layout.setPadding(40, 40, 40, 40);
         
-        // タイトル
-        TextView title = new TextView(this);
-        title.setText("音声監視アプリ");
-        title.setTextSize(24);
-        title.setPadding(0, 0, 0, 20);
-        layout.addView(title);
-        
         // ステータス表示
         statusText = new TextView(this);
         statusText.setText("ステータス: 停止中");
         statusText.setTextSize(16);
         statusText.setPadding(0, 0, 0, 10);
         layout.addView(statusText);
-        
-        // ログパス表示
-        logPathText = new TextView(this);
-        logPathText.setText("ログ保存先: " + logManager.getLogFolderPath());
-        logPathText.setTextSize(12);
-        logPathText.setPadding(0, 0, 0, 6);
-        layout.addView(logPathText);
-
-        // ログファイルのメタ情報（サイズ・最終更新）
-        fileMetaText = new TextView(this);
-        fileMetaText.setText("ログファイル: -");
-        fileMetaText.setTextSize(12);
-        fileMetaText.setPadding(0, 0, 0, 20);
-        layout.addView(fileMetaText);
         
         // VAD閾値スライダー + 音量インジケータ（同縮尺）
         float savedThreshold = prefs.getFloat("rms_threshold", 900.0f);
@@ -129,13 +105,13 @@ public class MainActivity extends Activity {
         if (savedInt > VAD_MAX) savedInt = VAD_MAX;
 
         LinearLayout meterRow = new LinearLayout(this);
-        meterRow.setOrientation(LinearLayout.HORIZONTAL);
+        meterRow.setOrientation(LinearLayout.VERTICAL);
         meterRow.setPadding(0, 10, 0, 10);
-        meterRow.setWeightSum(2f);
 
         LinearLayout sensitivityColumn = new LinearLayout(this);
         sensitivityColumn.setOrientation(LinearLayout.VERTICAL);
-        sensitivityColumn.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        sensitivityColumn.setLayoutParams(new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         final TextView vadLabel = new TextView(this);
         vadLabel.setText("音声感度 (閾値): " + savedInt);
@@ -163,11 +139,12 @@ public class MainActivity extends Activity {
 
         LinearLayout volumeColumn = new LinearLayout(this);
         volumeColumn.setOrientation(LinearLayout.VERTICAL);
-        volumeColumn.setLayoutParams(new LinearLayout.LayoutParams(0, LinearLayout.LayoutParams.WRAP_CONTENT, 1f));
+        volumeColumn.setLayoutParams(new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, LinearLayout.LayoutParams.WRAP_CONTENT));
 
         volumeIndicatorLabel = new TextView(this);
         volumeIndicatorLabel.setText("入力音量 (RMS): 0");
-        volumeIndicatorLabel.setPadding(10, 0, 0, 10);
+        volumeIndicatorLabel.setPadding(0, 10, 0, 10);
         volumeColumn.addView(volumeIndicatorLabel);
 
         volumeIndicatorSeekBar = new SeekBar(this);
@@ -242,11 +219,6 @@ public class MainActivity extends Activity {
         modelSpinner.setAdapter(modelSpinnerAdapter);
         layout.addView(modelSpinner);
 
-        Button refreshModelListButton = new Button(this);
-        refreshModelListButton.setText("モデル一覧更新");
-        refreshModelListButton.setOnClickListener(v -> refreshModelSpinner(true));
-        layout.addView(refreshModelListButton);
-
         // 選択モデルへ切替
         Button switchModelButton = new Button(this);
         switchModelButton.setText("選択モデルへ切替");
@@ -286,6 +258,8 @@ public class MainActivity extends Activity {
                 startService(intent);
             }
             Toast.makeText(this, "モデル削除を要求しました: " + modelName, Toast.LENGTH_SHORT).show();
+            if (uiHandler == null) uiHandler = new Handler(Looper.getMainLooper());
+            uiHandler.postDelayed(() -> refreshModelSpinner(true), 500);
         });
         layout.addView(deleteModelButton);
 
@@ -295,7 +269,6 @@ public class MainActivity extends Activity {
         clearLogsButton.setOnClickListener(v -> {
             logManager.clearAllLogs();
             updateLogDisplay();
-            logPathText.setText("ログ保存先: " + logManager.getLogFolderPath());
             Toast.makeText(this, "ログファイルのデータを初期化しました", Toast.LENGTH_SHORT).show();
         });
         layout.addView(clearLogsButton);
@@ -341,8 +314,11 @@ public class MainActivity extends Activity {
         refreshModelSpinner(false);
         updateDownloadProgressIndicator();
         updateVolumeIndicator();
-        
-        setContentView(layout);
+
+        ScrollView rootScrollView = new ScrollView(this);
+        rootScrollView.setFillViewport(true);
+        rootScrollView.addView(layout);
+        setContentView(rootScrollView);
     }
     
     private void checkPermissions() {
@@ -526,7 +502,6 @@ public class MainActivity extends Activity {
             int index = selectedBefore != null ? modelNames.indexOf(selectedBefore) : -1;
             modelSpinner.setSelection(index >= 0 ? index : 0);
         }
-        lastModelListRefreshMs = System.currentTimeMillis();
     }
 
     private void updateDownloadProgressIndicator() {
@@ -555,6 +530,10 @@ public class MainActivity extends Activity {
                 modelDownloadProgressText.setText("モデルDL進捗: 待機中");
             }
         }
+        if (wasModelDownloadActive && !active) {
+            refreshModelSpinner(true);
+        }
+        wasModelDownloadActive = active;
     }
 
     private void updateVolumeIndicator() {
@@ -575,7 +554,6 @@ public class MainActivity extends Activity {
             File[] logFiles = logManager.getLogFiles();
             if (logFiles == null || logFiles.length == 0) {
                 logContentText.setText("ログファイルがありません");
-                fileMetaText.setText("ログファイル: -");
                 return;
             }
 
@@ -590,9 +568,6 @@ public class MainActivity extends Activity {
             }
 
             if (latestLogFile != null) {
-                // メタ情報を更新
-                updateLogMeta(latestLogFile);
-
                 // ログは末尾200行を表示する
                 int maxLines = 200;
                 Deque<String> deque = new ArrayDeque<>(maxLines);
@@ -644,15 +619,6 @@ public class MainActivity extends Activity {
         } catch (IOException e) {
             logContentText.setText("ログ読み込みエラー: " + e.getMessage());
         }
-    }
-
-    private void updateLogMeta(File latestLogFile) {
-        if (latestLogFile == null) return;
-        String name = latestLogFile.getName();
-        long size = latestLogFile.length();
-        long lm = latestLogFile.lastModified();
-        String lmStr = android.text.format.DateFormat.format("yyyy-MM-dd HH:mm:ss", new java.util.Date(lm)).toString();
-        fileMetaText.setText(String.format("ログファイル: %s  サイズ: %d bytes  最終更新: %s", name, size, lmStr));
     }
 
     private void exportLatestLog() {
@@ -719,7 +685,6 @@ public class MainActivity extends Activity {
                     try {
                         updateLogDisplay();
                         updateStatusFromPrefs();
-                        refreshModelSpinner(true);
                     } catch (Exception ignored) {}
                     uiHandler.postDelayed(this, UPDATE_INTERVAL_MS);
                 }
@@ -732,10 +697,6 @@ public class MainActivity extends Activity {
                     try {
                         updateDownloadProgressIndicator();
                         updateVolumeIndicator();
-                        long now = System.currentTimeMillis();
-                        if (now - lastModelListRefreshMs >= MODEL_LIST_REFRESH_INTERVAL_MS) {
-                            refreshModelSpinner(true);
-                        }
                     } catch (Exception ignored) {}
                     uiHandler.postDelayed(this, INDICATOR_UPDATE_INTERVAL_MS);
                 }

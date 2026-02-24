@@ -4,6 +4,7 @@ import android.Manifest;
 import android.app.Activity;
 import android.content.Intent;
 import android.content.pm.PackageManager;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.widget.Button;
@@ -18,8 +19,10 @@ import android.os.Handler;
 import android.os.Looper;
 import java.io.BufferedReader;
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileReader;
 import java.io.IOException;
+import java.io.OutputStream;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -27,6 +30,7 @@ import java.util.Deque;
 public class MainActivity extends Activity {
     
     private static final int PERMISSION_REQUEST_CODE = 100;
+    private static final int LOG_EXPORT_REQUEST_CODE = 101;
     private static final String[] REQUIRED_PERMISSIONS = {
         Manifest.permission.RECORD_AUDIO
     };
@@ -44,6 +48,7 @@ public class MainActivity extends Activity {
     private static final int UPDATE_INTERVAL_MS = 5000; // 5s
 
     private LogManager2 logManager;
+    private File pendingExportLogFile;
     private boolean isServiceRunning = false;
     private SharedPreferences prefs;
     private static final String PREF_MON_STATE = "monitor_state";
@@ -146,9 +151,9 @@ public class MainActivity extends Activity {
         urlInput.setText("https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip");
         layout.addView(urlInput);
 
-        // モデル入れ替えボタン
+        // モデルロード（同一URLは削除後に再取得）
         Button replaceModelButton = new Button(this);
-        replaceModelButton.setText("モデルロード");
+        replaceModelButton.setText("モデルロード/再DL");
         replaceModelButton.setOnClickListener(v -> {
             String url = urlInput.getText().toString().trim();
             if (url.isEmpty()) {
@@ -158,7 +163,6 @@ public class MainActivity extends Activity {
             Intent intent = new Intent(this, VoiceListenerService.class);
             intent.setAction(VoiceListenerService.ACTION_INSTALL_MODEL);
             intent.putExtra(VoiceListenerService.EXTRA_MODEL_URL, url);
-            intent.putExtra(VoiceListenerService.EXTRA_MODEL_REPLACE, true);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent);
             } else {
@@ -168,6 +172,48 @@ public class MainActivity extends Activity {
         });
         layout.addView(replaceModelButton);
 
+        // URL指定モデルへ切替
+        Button switchModelButton = new Button(this);
+        switchModelButton.setText("URLモデルへ切替");
+        switchModelButton.setOnClickListener(v -> {
+            String url = urlInput.getText().toString().trim();
+            if (url.isEmpty()) {
+                Toast.makeText(this, "URLを入力してください", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Intent intent = new Intent(this, VoiceListenerService.class);
+            intent.setAction(VoiceListenerService.ACTION_SELECT_MODEL);
+            intent.putExtra(VoiceListenerService.EXTRA_MODEL_URL, url);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent);
+            } else {
+                startService(intent);
+            }
+            Toast.makeText(this, "モデル切替を要求しました", Toast.LENGTH_SHORT).show();
+        });
+        layout.addView(switchModelButton);
+
+        // URL指定モデルの削除
+        Button deleteModelButton = new Button(this);
+        deleteModelButton.setText("URLモデル削除");
+        deleteModelButton.setOnClickListener(v -> {
+            String url = urlInput.getText().toString().trim();
+            if (url.isEmpty()) {
+                Toast.makeText(this, "URLを入力してください", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Intent intent = new Intent(this, VoiceListenerService.class);
+            intent.setAction(VoiceListenerService.ACTION_DELETE_MODEL);
+            intent.putExtra(VoiceListenerService.EXTRA_MODEL_URL, url);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent);
+            } else {
+                startService(intent);
+            }
+            Toast.makeText(this, "モデル削除を要求しました", Toast.LENGTH_SHORT).show();
+        });
+        layout.addView(deleteModelButton);
+
         // ログ初期化ボタン
         Button clearLogsButton = new Button(this);
         clearLogsButton.setText("ログ初期化");
@@ -175,9 +221,15 @@ public class MainActivity extends Activity {
             logManager.clearAllLogs();
             updateLogDisplay();
             logPathText.setText("ログ保存先: " + logManager.getLogFolderPath());
-            Toast.makeText(this, "ログを初期化しました", Toast.LENGTH_SHORT).show();
+            Toast.makeText(this, "ログファイルのデータを初期化しました", Toast.LENGTH_SHORT).show();
         });
         layout.addView(clearLogsButton);
+
+        // 任意場所にログを保存
+        Button exportLogButton = new Button(this);
+        exportLogButton.setText("ログダウンロード");
+        exportLogButton.setOnClickListener(v -> exportLatestLog());
+        layout.addView(exportLogButton);
 
         // ログ表示更新ボタン
         Button refreshLogButton = new Button(this);
@@ -434,6 +486,53 @@ public class MainActivity extends Activity {
         long lm = latestLogFile.lastModified();
         String lmStr = android.text.format.DateFormat.format("yyyy-MM-dd HH:mm:ss", new java.util.Date(lm)).toString();
         fileMetaText.setText(String.format("ログファイル: %s  サイズ: %d bytes  最終更新: %s", name, size, lmStr));
+    }
+
+    private void exportLatestLog() {
+        File latestLogFile = logManager.getLatestLogFile();
+        if (latestLogFile == null || !latestLogFile.exists()) {
+            Toast.makeText(this, "ダウンロード対象のログがありません", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        pendingExportLogFile = latestLogFile;
+        Intent intent = new Intent(Intent.ACTION_CREATE_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("text/plain");
+        intent.putExtra(Intent.EXTRA_TITLE, latestLogFile.getName());
+        startActivityForResult(intent, LOG_EXPORT_REQUEST_CODE);
+    }
+
+    @Override
+    protected void onActivityResult(int requestCode, int resultCode, Intent data) {
+        super.onActivityResult(requestCode, resultCode, data);
+        if (requestCode != LOG_EXPORT_REQUEST_CODE) return;
+
+        if (resultCode != RESULT_OK || data == null || pendingExportLogFile == null) {
+            pendingExportLogFile = null;
+            return;
+        }
+
+        Uri destinationUri = data.getData();
+        if (destinationUri == null) {
+            pendingExportLogFile = null;
+            return;
+        }
+
+        try (FileInputStream in = new FileInputStream(pendingExportLogFile);
+             OutputStream out = getContentResolver().openOutputStream(destinationUri, "w")) {
+            if (out == null) throw new IOException("保存先を開けません");
+            byte[] buffer = new byte[8192];
+            int len;
+            while ((len = in.read(buffer)) != -1) {
+                out.write(buffer, 0, len);
+            }
+            out.flush();
+            Toast.makeText(this, "ログを保存しました", Toast.LENGTH_SHORT).show();
+        } catch (IOException e) {
+            Toast.makeText(this, "ログ保存エラー: " + e.getMessage(), Toast.LENGTH_LONG).show();
+        } finally {
+            pendingExportLogFile = null;
+        }
     }
     
     @Override

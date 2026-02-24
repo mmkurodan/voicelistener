@@ -1,0 +1,8 @@
+com.micklab.voicelistener.app-jetified-jna-5.13.0-0 /home/userland/.gradle/caches/transforms-4/596b3b155ac21d85b3863fc358d645bf/transformed/jetified-jna-5.13.0/res
+com.micklab.voicelistener.app-pngs-1 /home/userland/voicelistener/app/build/generated/res/pngs/release
+com.micklab.voicelistener.app-resValues-2 /home/userland/voicelistener/app/build/generated/res/resValues/release
+com.micklab.voicelistener.app-packageReleaseResources-3 /home/userland/voicelistener/app/build/intermediates/incremental/release/packageReleaseResources/merged.dir
+com.micklab.voicelistener.app-packageReleaseResources-4 /home/userland/voicelistener/app/build/intermediates/incremental/release/packageReleaseResources/stripped.dir
+com.micklab.voicelistener.app-merged_res-5 /home/userland/voicelistener/app/build/intermediates/merged_res/release
+com.micklab.voicelistener.app-main-6 /home/userland/voicelistener/app/src/main/res
+com.micklab.voicelistener.app-release-7 /home/userland/voicelistener/app/src/release/res

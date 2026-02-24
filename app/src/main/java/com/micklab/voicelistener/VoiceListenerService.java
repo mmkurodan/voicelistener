@@ -25,8 +25,11 @@ import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.charset.StandardCharsets;
+import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
@@ -47,17 +50,21 @@ public class VoiceListenerService extends Service {
     private static final int MIN_SPEECH_FRAMES = 8;
     private static final double RMS_THRESHOLD = 900.0;
 
-    private static final String VOSK_MODEL_FOLDER = "vosk-model-ja";
+    private static final String LEGACY_VOSK_MODEL_FOLDER = "vosk-model-ja";
+    private static final String MODELS_FOLDER = "models";
     private static final String MODEL_ZIP_URL = "https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip";
 
     private static final String PREFS_NAME = "VoiceListenerPrefs";
     private static final String PREF_RMS_THRESHOLD = "rms_threshold";
     private static final String PREF_MON_STATE = "monitor_state";
+    private static final String PREF_ACTIVE_MODEL_URL = "active_model_url";
     private static final String MON_STATE_RUNNING = "running";
     private static final String MON_STATE_PENDING = "pending";
     private static final String MON_STATE_STOPPED = "stopped";
 
     public static final String ACTION_INSTALL_MODEL = "com.micklab.voicelistener.action.INSTALL_MODEL";
+    public static final String ACTION_SELECT_MODEL = "com.micklab.voicelistener.action.SELECT_MODEL";
+    public static final String ACTION_DELETE_MODEL = "com.micklab.voicelistener.action.DELETE_MODEL";
     public static final String ACTION_STOP_MONITORING = "com.micklab.voicelistener.action.STOP_MONITORING";
     public static final String EXTRA_MODEL_URL = "com.micklab.voicelistener.extra.MODEL_URL";
     public static final String EXTRA_MODEL_REPLACE = "com.micklab.voicelistener.extra.MODEL_REPLACE";
@@ -116,32 +123,52 @@ public class VoiceListenerService extends Service {
         // intent がモデルインストール要求または停止要求を含む場合は先に処理する
         String action = intent != null ? intent.getAction() : null;
         if (ACTION_INSTALL_MODEL.equals(action)) {
-            String url = intent.getStringExtra(EXTRA_MODEL_URL);
-            boolean replace = intent.getBooleanExtra(EXTRA_MODEL_REPLACE, true);
-            File documentsDir = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS);
-            if (documentsDir == null) documentsDir = getFilesDir();
-            File modelDir = new File(new File(documentsDir, "VoiceListener"), VOSK_MODEL_FOLDER);
-            installModelFromUrlAsync(modelDir, (url == null || url.isEmpty()) ? MODEL_ZIP_URL : url, replace, true);
+            String url = normalizeModelUrl(intent.getStringExtra(EXTRA_MODEL_URL));
+            File modelDir = getModelDirForUrl(url);
+            // 同一URLは常に削除して再ダウンロードする
+            installModelFromUrlAsync(modelDir, url, true, !isCapturing, true);
             // モデルインストールリクエスト時は音声認識はここで開始しない
+        } else if (ACTION_SELECT_MODEL.equals(action)) {
+            String url = normalizeModelUrl(intent != null ? intent.getStringExtra(EXTRA_MODEL_URL) : null);
+            boolean switched = switchToModelUrl(url, true);
+            if (logManager != null) {
+                logManager.writeLog(switched ? ("モデル切替完了: " + url) : ("モデル切替失敗（未ダウンロード）: " + url), false);
+            }
+            if (!isCapturing) {
+                stopSelf();
+            }
+        } else if (ACTION_DELETE_MODEL.equals(action)) {
+            String url = normalizeModelUrl(intent != null ? intent.getStringExtra(EXTRA_MODEL_URL) : null);
+            boolean deleted = deleteModelByUrl(url);
+            if (logManager != null) {
+                logManager.writeLog(deleted ? ("モデル削除完了: " + url) : ("モデル削除対象なし: " + url), false);
+            }
+            if (!isCapturing) {
+                stopSelf();
+            }
         } else if (ACTION_STOP_MONITORING.equals(action)) {
             // UIの停止要求: 録音は停止し、既にキューに入っている処理を完了したらサービスを終了する
             try { if (logManager != null) logManager.writeLog("監視停止要求を受信: 録音を停止し、保留処理完了後に終了します", false); } catch (Exception ignored) {}
             // set pending state
             try { if (sharedPrefs != null) sharedPrefs.edit().putString(PREF_MON_STATE, MON_STATE_PENDING).apply(); } catch (Exception ignored) {}
             stopAudioCapture();
-            if (transcriptionExecutor != null) {
+            ExecutorService drainingExecutor = transcriptionExecutor;
+            if (drainingExecutor != null) {
                 if (modelInstallerExecutor == null) modelInstallerExecutor = Executors.newSingleThreadExecutor();
                 modelInstallerExecutor.execute(() -> {
                     try {
-                        transcriptionExecutor.shutdown();
-                        boolean terminated = transcriptionExecutor.awaitTermination(120, TimeUnit.SECONDS);
+                        drainingExecutor.shutdown();
+                        boolean terminated = drainingExecutor.awaitTermination(120, TimeUnit.SECONDS);
                         if (!terminated) {
-                            transcriptionExecutor.shutdownNow();
+                            drainingExecutor.shutdownNow();
                         }
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         try { if (logManager != null) logManager.writeLog("監視停止待機中に割込: " + e.getMessage(), false); } catch (Exception ignored) {}
                     } finally {
+                        if (transcriptionExecutor == drainingExecutor) {
+                            transcriptionExecutor = null;
+                        }
                         try { if (logManager != null) logManager.writeLog("保留処理完了、サービスを停止します", false); } catch (Exception ignored) {}
                         // set stopped state
                         try { if (sharedPrefs != null) sharedPrefs.edit().putString(PREF_MON_STATE, MON_STATE_STOPPED).apply(); } catch (Exception ignored) {}
@@ -234,30 +261,35 @@ public class VoiceListenerService extends Service {
     }
 
     private void initializeAsrEngine() {
-        File documentsDir = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS);
-        if (documentsDir == null) {
-            documentsDir = getFilesDir();
-        }
-        File modelDir = new File(new File(documentsDir, "VoiceListener"), VOSK_MODEL_FOLDER);
-
-        OfflineAsrEngine voskEngine = new VoskOfflineAsrEngine(modelDir.getAbsolutePath());
-        if (voskEngine.initialize()) {
-            asrEngine = voskEngine;
-            Log.i(TAG, "ASR engine: " + asrEngine.name());
+        File preferredModelDir = resolvePreferredModelDir();
+        if (initializeAsrEngineWithModel(preferredModelDir)) {
             return;
         }
 
-        // モデルがないためフォールバックし、非同期でモデル取得を試みる
         asrEngine = new NoOpOfflineAsrEngine();
         asrEngine.initialize();
         Log.w(TAG, "ASR engine fallback: " + asrEngine.name() + " (model missing)");
     }
 
     private void installModelIfMissingAsync(File modelDir) {
-        installModelFromUrlAsync(modelDir, MODEL_ZIP_URL, false, false);
+        installModelFromUrlAsync(modelDir, MODEL_ZIP_URL, false, false, true);
     }
 
-    private void installModelFromUrlAsync(File modelDir, String url, boolean replace, boolean stopServiceOnFinish) {
+    private boolean initializeAsrEngineWithModel(File modelDir) {
+        if (!hasModelContent(modelDir)) {
+            return false;
+        }
+        OfflineAsrEngine newEngine = new VoskOfflineAsrEngine(modelDir.getAbsolutePath());
+        if (!newEngine.initialize()) {
+            try { newEngine.shutdown(); } catch (Exception ignored) {}
+            return false;
+        }
+        replaceAsrEngine(newEngine);
+        Log.i(TAG, "ASR engine: " + newEngine.name() + " @ " + modelDir.getAbsolutePath());
+        return true;
+    }
+
+    private void installModelFromUrlAsync(File modelDir, String url, boolean replace, boolean stopServiceOnFinish, boolean activateAfterInstall) {
         if (!replace && modelDir.exists() && modelDir.isDirectory() && modelDir.listFiles() != null && modelDir.listFiles().length > 0) {
             // 既に存在する
             return;
@@ -275,9 +307,17 @@ public class VoiceListenerService extends Service {
                 Log.w(TAG, "ログ書き込み失敗", e);
             }
 
-            File cacheZip = new File(getCacheDir(), "vosk_model.zip");
-            File extractDir = new File(getCacheDir(), "vosk_model_extract");
+            String modelKey = hashUrl(url);
+            File cacheZip = new File(getCacheDir(), "vosk_model_" + modelKey + ".zip");
+            File extractDir = new File(getCacheDir(), "vosk_model_extract_" + modelKey);
             try {
+                if (cacheZip.exists()) {
+                    deleteRecursively(cacheZip);
+                }
+                if (extractDir.exists()) {
+                    deleteRecursively(extractDir);
+                }
+
                 boolean dlOk = downloadFile(url, cacheZip);
                 if (!dlOk) {
                     logManager.writeLog("モデルダウンロード失敗");
@@ -322,16 +362,16 @@ public class VoiceListenerService extends Service {
 
                 logManager.writeLog("モデル取得・展開完了: " + modelDir.getAbsolutePath());
 
-                // 再初期化
-                OfflineAsrEngine newEngine = new VoskOfflineAsrEngine(modelDir.getAbsolutePath());
-                if (newEngine.initialize()) {
-                    if (asrEngine != null) {
-                        try { asrEngine.shutdown(); } catch (Exception ignored) {}
+                if (activateAfterInstall && sharedPrefs != null) {
+                    sharedPrefs.edit().putString(PREF_ACTIVE_MODEL_URL, url).apply();
+                }
+
+                if (activateAfterInstall) {
+                    if (switchToModelUrl(url, false)) {
+                        logManager.writeLog("ASRエンジン初期化成功");
+                    } else {
+                        logManager.writeLog("ASRエンジン初期化失敗");
                     }
-                    asrEngine = newEngine;
-                    logManager.writeLog("ASRエンジン初期化成功: " + asrEngine.name());
-                } else {
-                    logManager.writeLog("ASRエンジン初期化失敗");
                 }
 
             } catch (Exception e) {
@@ -343,6 +383,155 @@ public class VoiceListenerService extends Service {
                 }
             }
         });
+    }
+
+    private String normalizeModelUrl(String url) {
+        if (url == null || url.trim().isEmpty()) {
+            return MODEL_ZIP_URL;
+        }
+        return url.trim();
+    }
+
+    private File getVoiceListenerRootDir() {
+        File documentsDir = getExternalFilesDir(Environment.DIRECTORY_DOCUMENTS);
+        if (documentsDir == null) {
+            documentsDir = getFilesDir();
+        }
+        File rootDir = new File(documentsDir, "VoiceListener");
+        if (!rootDir.exists()) {
+            rootDir.mkdirs();
+        }
+        return rootDir;
+    }
+
+    private File getModelsRootDir() {
+        File modelsDir = new File(getVoiceListenerRootDir(), MODELS_FOLDER);
+        if (!modelsDir.exists()) {
+            modelsDir.mkdirs();
+        }
+        return modelsDir;
+    }
+
+    private File getLegacyModelDir() {
+        return new File(getVoiceListenerRootDir(), LEGACY_VOSK_MODEL_FOLDER);
+    }
+
+    private File getModelDirForUrl(String url) {
+        return new File(getModelsRootDir(), "model_" + hashUrl(normalizeModelUrl(url)));
+    }
+
+    private boolean hasModelContent(File modelDir) {
+        if (modelDir == null || !modelDir.exists() || !modelDir.isDirectory()) {
+            return false;
+        }
+        File[] files = modelDir.listFiles();
+        return files != null && files.length > 0;
+    }
+
+    private File resolvePreferredModelDir() {
+        String activeUrl = sharedPrefs != null ? sharedPrefs.getString(PREF_ACTIVE_MODEL_URL, null) : null;
+        if (activeUrl != null) {
+            File activeDir = getModelDirForUrl(activeUrl);
+            if (hasModelContent(activeDir)) {
+                return activeDir;
+            }
+        }
+
+        File legacyDir = getLegacyModelDir();
+        if (hasModelContent(legacyDir)) {
+            return legacyDir;
+        }
+
+        File[] modelDirs = getModelsRootDir().listFiles();
+        if (modelDirs != null) {
+            for (File modelDir : modelDirs) {
+                if (hasModelContent(modelDir)) {
+                    return modelDir;
+                }
+            }
+        }
+        return null;
+    }
+
+    private boolean switchToModelUrl(String url, boolean persistSelection) {
+        String normalizedUrl = normalizeModelUrl(url);
+        File modelDir = getModelDirForUrl(normalizedUrl);
+        if (!hasModelContent(modelDir)) {
+            return false;
+        }
+
+        OfflineAsrEngine newEngine = new VoskOfflineAsrEngine(modelDir.getAbsolutePath());
+        if (!newEngine.initialize()) {
+            try { newEngine.shutdown(); } catch (Exception ignored) {}
+            return false;
+        }
+
+        replaceAsrEngine(newEngine);
+        if (persistSelection && sharedPrefs != null) {
+            sharedPrefs.edit().putString(PREF_ACTIVE_MODEL_URL, normalizedUrl).apply();
+        }
+        return true;
+    }
+
+    private boolean deleteModelByUrl(String url) {
+        String normalizedUrl = normalizeModelUrl(url);
+        File modelDir = getModelDirForUrl(normalizedUrl);
+        if (!modelDir.exists()) {
+            return false;
+        }
+
+        deleteRecursively(modelDir);
+        boolean deleted = !modelDir.exists();
+        if (deleted && sharedPrefs != null) {
+            String activeUrl = sharedPrefs.getString(PREF_ACTIVE_MODEL_URL, null);
+            if (normalizedUrl.equals(activeUrl)) {
+                sharedPrefs.edit().remove(PREF_ACTIVE_MODEL_URL).apply();
+                initializeAsrEngine();
+            }
+        }
+        return deleted;
+    }
+
+    private void replaceAsrEngine(OfflineAsrEngine newEngine) {
+        Runnable swapTask = () -> {
+            OfflineAsrEngine oldEngine = asrEngine;
+            asrEngine = newEngine;
+            if (oldEngine != null && oldEngine != newEngine) {
+                try { oldEngine.shutdown(); } catch (Exception ignored) {}
+            }
+        };
+
+        if (!isCapturing) {
+            swapTask.run();
+            return;
+        }
+
+        ensureTranscriptionExecutor();
+        try {
+            transcriptionExecutor.execute(swapTask);
+        } catch (RejectedExecutionException e) {
+            swapTask.run();
+        }
+    }
+
+    private void ensureTranscriptionExecutor() {
+        if (transcriptionExecutor == null || transcriptionExecutor.isShutdown() || transcriptionExecutor.isTerminated()) {
+            transcriptionExecutor = Executors.newSingleThreadExecutor();
+        }
+    }
+
+    private String hashUrl(String url) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(url.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < 12 && i < hash.length; i++) {
+                sb.append(String.format("%02x", hash[i]));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return Integer.toHexString(url.hashCode());
+        }
     }
 
     private boolean downloadFile(String urlStr, File destination) {
@@ -455,6 +644,11 @@ public class VoiceListenerService extends Service {
         if (isCapturing) {
             return;
         }
+        ensureTranscriptionExecutor();
+        if (asrEngine == null || (asrEngine instanceof NoOpOfflineAsrEngine)) {
+            initializeAsrEngine();
+        }
+
         ArrayList<String> missing = new ArrayList<>();
         if (checkSelfPermission(Manifest.permission.RECORD_AUDIO) != PackageManager.PERMISSION_GRANTED) {
             missing.add(Manifest.permission.RECORD_AUDIO);
@@ -547,10 +741,10 @@ public class VoiceListenerService extends Service {
     }
 
     private void submitForTranscription(short[] segment) {
-        if (transcriptionExecutor == null) {
-            return;
-        }
-        transcriptionExecutor.execute(() -> {
+        ensureTranscriptionExecutor();
+        if (transcriptionExecutor == null) return;
+
+        Runnable task = () -> {
             try {
                 OfflineAsrEngine engine = asrEngine; // snapshot to avoid race with shutdown
                 if (engine == null) return;
@@ -564,7 +758,20 @@ public class VoiceListenerService extends Service {
                 Log.e(TAG, "Transcription task failed", e);
                 try { if (logManager != null) logManager.writeLog("Transcription例外: " + e.getMessage()); } catch (Exception ignored) {}
             }
-        });
+        };
+
+        try {
+            transcriptionExecutor.execute(task);
+        } catch (RejectedExecutionException ex) {
+            Log.w(TAG, "Transcription executor rejected task, recreating executor");
+            ensureTranscriptionExecutor();
+            try {
+                transcriptionExecutor.execute(task);
+            } catch (RejectedExecutionException e) {
+                Log.e(TAG, "Transcription task dropped after executor recreate", e);
+                try { if (logManager != null) logManager.writeLog("Transcription投入失敗: " + e.getMessage(), false); } catch (Exception ignored) {}
+            }
+        }
     }
 
     private void stopAudioCapture() {

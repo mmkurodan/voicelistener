@@ -11,10 +11,6 @@
     <!-- 音声録音権限 -->
     <uses-permission android:name="android.permission.RECORD_AUDIO" />
 
-    <!-- 外部ストレージ書き込み権限 -->
-    <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE" />
-    <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE" />
-
     <!-- フォアグラウンドサービス権限 -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
@@ -22,6 +18,8 @@
     <!-- システム起動時の自動開始 -->
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
 
+    <!-- ネットワーク（モデルダウンロード） -->
+    <uses-permission android:name="android.permission.INTERNET" />
     <!-- 通知権限 -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
 

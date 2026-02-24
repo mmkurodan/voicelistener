@@ -11,6 +11,7 @@ import android.content.pm.PackageManager;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
+import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
 import android.os.IBinder;
@@ -29,6 +30,7 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Locale;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -57,7 +59,12 @@ public class VoiceListenerService extends Service {
     private static final String PREFS_NAME = "VoiceListenerPrefs";
     private static final String PREF_RMS_THRESHOLD = "rms_threshold";
     private static final String PREF_MON_STATE = "monitor_state";
-    private static final String PREF_ACTIVE_MODEL_URL = "active_model_url";
+    private static final String PREF_ACTIVE_MODEL_NAME = "active_model_name";
+    private static final String PREF_ACTIVE_MODEL_URL = "active_model_url"; // legacy
+    private static final String PREF_MODEL_DOWNLOAD_ACTIVE = "model_download_active";
+    private static final String PREF_MODEL_DOWNLOAD_PROGRESS = "model_download_progress";
+    private static final String PREF_MODEL_DOWNLOAD_NAME = "model_download_name";
+    private static final String PREF_CURRENT_RMS = "current_rms";
     private static final String MON_STATE_RUNNING = "running";
     private static final String MON_STATE_PENDING = "pending";
     private static final String MON_STATE_STOPPED = "stopped";
@@ -67,6 +74,7 @@ public class VoiceListenerService extends Service {
     public static final String ACTION_DELETE_MODEL = "com.micklab.voicelistener.action.DELETE_MODEL";
     public static final String ACTION_STOP_MONITORING = "com.micklab.voicelistener.action.STOP_MONITORING";
     public static final String EXTRA_MODEL_URL = "com.micklab.voicelistener.extra.MODEL_URL";
+    public static final String EXTRA_MODEL_NAME = "com.micklab.voicelistener.extra.MODEL_NAME";
     public static final String EXTRA_MODEL_REPLACE = "com.micklab.voicelistener.extra.MODEL_REPLACE";
 
     private LogManager2 logManager;
@@ -80,6 +88,7 @@ public class VoiceListenerService extends Service {
     private AudioRecord audioRecord;
     private Thread captureThread;
     private volatile boolean isCapturing = false;
+    private long lastRmsPublishMs = 0L;
 
     @Override
     public void onCreate() {
@@ -129,19 +138,31 @@ public class VoiceListenerService extends Service {
             installModelFromUrlAsync(modelDir, url, true, !isCapturing, true);
             // モデルインストールリクエスト時は音声認識はここで開始しない
         } else if (ACTION_SELECT_MODEL.equals(action)) {
-            String url = normalizeModelUrl(intent != null ? intent.getStringExtra(EXTRA_MODEL_URL) : null);
-            boolean switched = switchToModelUrl(url, true);
+            String modelName = normalizeModelName(intent != null ? intent.getStringExtra(EXTRA_MODEL_NAME) : null);
+            if (modelName == null && intent != null) {
+                String legacyUrl = intent.getStringExtra(EXTRA_MODEL_URL);
+                if (legacyUrl != null && !legacyUrl.trim().isEmpty()) {
+                    modelName = getModelNameFromUrl(legacyUrl);
+                }
+            }
+            boolean switched = switchToModelName(modelName, true);
             if (logManager != null) {
-                logManager.writeLog(switched ? ("モデル切替完了: " + url) : ("モデル切替失敗（未ダウンロード）: " + url), false);
+                logManager.writeLog(switched ? ("モデル切替完了: " + modelName) : ("モデル切替失敗（未ダウンロード）: " + modelName), false);
             }
             if (!isCapturing) {
                 stopSelf();
             }
         } else if (ACTION_DELETE_MODEL.equals(action)) {
-            String url = normalizeModelUrl(intent != null ? intent.getStringExtra(EXTRA_MODEL_URL) : null);
-            boolean deleted = deleteModelByUrl(url);
+            String modelName = normalizeModelName(intent != null ? intent.getStringExtra(EXTRA_MODEL_NAME) : null);
+            if (modelName == null && intent != null) {
+                String legacyUrl = intent.getStringExtra(EXTRA_MODEL_URL);
+                if (legacyUrl != null && !legacyUrl.trim().isEmpty()) {
+                    modelName = getModelNameFromUrl(legacyUrl);
+                }
+            }
+            boolean deleted = deleteModelByName(modelName);
             if (logManager != null) {
-                logManager.writeLog(deleted ? ("モデル削除完了: " + url) : ("モデル削除対象なし: " + url), false);
+                logManager.writeLog(deleted ? ("モデル削除完了: " + modelName) : ("モデル削除対象なし: " + modelName), false);
             }
             if (!isCapturing) {
                 stopSelf();
@@ -210,6 +231,15 @@ public class VoiceListenerService extends Service {
 
         // ensure state is stopped
         try { if (sharedPrefs != null) sharedPrefs.edit().putString(PREF_MON_STATE, MON_STATE_STOPPED).apply(); } catch (Exception ignored) {}
+        try {
+            if (sharedPrefs != null) {
+                sharedPrefs.edit()
+                    .putBoolean(PREF_MODEL_DOWNLOAD_ACTIVE, false)
+                    .putInt(PREF_MODEL_DOWNLOAD_PROGRESS, 0)
+                    .putFloat(PREF_CURRENT_RMS, 0f)
+                    .apply();
+            }
+        } catch (Exception ignored) {}
 
         if (sharedPrefs != null && prefsListener != null) {
             try { sharedPrefs.unregisterOnSharedPreferenceChangeListener(prefsListener); } catch (Exception ignored) {}
@@ -290,6 +320,8 @@ public class VoiceListenerService extends Service {
     }
 
     private void installModelFromUrlAsync(File modelDir, String url, boolean replace, boolean stopServiceOnFinish, boolean activateAfterInstall) {
+        final String normalizedUrl = normalizeModelUrl(url);
+        final String modelName = getModelNameFromUrl(normalizedUrl);
         if (!replace && modelDir.exists() && modelDir.isDirectory() && modelDir.listFiles() != null && modelDir.listFiles().length > 0) {
             // 既に存在する
             return;
@@ -301,13 +333,15 @@ public class VoiceListenerService extends Service {
             modelInstallerExecutor = Executors.newSingleThreadExecutor();
         }
         modelInstallerExecutor.execute(() -> {
+            int finalProgress = 0;
             try {
+                updateDownloadProgress(true, 0, modelName);
                 logManager.writeLog("モデル取得開始: " + url);
             } catch (Exception e) {
                 Log.w(TAG, "ログ書き込み失敗", e);
             }
 
-            String modelKey = hashUrl(url);
+            String modelKey = hashUrl(normalizedUrl);
             File cacheZip = new File(getCacheDir(), "vosk_model_" + modelKey + ".zip");
             File extractDir = new File(getCacheDir(), "vosk_model_extract_" + modelKey);
             try {
@@ -318,7 +352,7 @@ public class VoiceListenerService extends Service {
                     deleteRecursively(extractDir);
                 }
 
-                boolean dlOk = downloadFile(url, cacheZip);
+                boolean dlOk = downloadFile(normalizedUrl, cacheZip, modelName);
                 if (!dlOk) {
                     logManager.writeLog("モデルダウンロード失敗");
                     if (stopServiceOnFinish) stopSelf();
@@ -361,13 +395,17 @@ public class VoiceListenerService extends Service {
                 deleteRecursively(extractDir);
 
                 logManager.writeLog("モデル取得・展開完了: " + modelDir.getAbsolutePath());
+                finalProgress = 100;
 
                 if (activateAfterInstall && sharedPrefs != null) {
-                    sharedPrefs.edit().putString(PREF_ACTIVE_MODEL_URL, url).apply();
+                    sharedPrefs.edit()
+                        .putString(PREF_ACTIVE_MODEL_NAME, modelName)
+                        .remove(PREF_ACTIVE_MODEL_URL)
+                        .apply();
                 }
 
                 if (activateAfterInstall) {
-                    if (switchToModelUrl(url, false)) {
+                    if (switchToModelName(modelName, false)) {
                         logManager.writeLog("ASRエンジン初期化成功");
                     } else {
                         logManager.writeLog("ASRエンジン初期化失敗");
@@ -378,6 +416,7 @@ public class VoiceListenerService extends Service {
                 try { logManager.writeLog("モデル取得中に例外発生: " + e.getMessage()); } catch (Exception ignored) {}
                 Log.e(TAG, "モデル取得例外", e);
             } finally {
+                try { updateDownloadProgress(false, finalProgress, modelName); } catch (Exception ignored) {}
                 if (stopServiceOnFinish) {
                     try { stopSelf(); } catch (Exception ignored) {}
                 }
@@ -390,6 +429,35 @@ public class VoiceListenerService extends Service {
             return MODEL_ZIP_URL;
         }
         return url.trim();
+    }
+
+    private String normalizeModelName(String modelName) {
+        if (modelName == null) return null;
+        String trimmed = modelName.trim();
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
+    private String getModelNameFromUrl(String url) {
+        String normalizedUrl = normalizeModelUrl(url);
+        String fallback = "model_" + hashUrl(normalizedUrl);
+        try {
+            Uri uri = Uri.parse(normalizedUrl);
+            String segment = uri != null ? uri.getLastPathSegment() : null;
+            if (segment == null || segment.trim().isEmpty()) {
+                return fallback;
+            }
+            segment = Uri.decode(segment).trim();
+            if (segment.isEmpty()) {
+                return fallback;
+            }
+            if (segment.toLowerCase(Locale.US).endsWith(".zip")) {
+                segment = segment.substring(0, segment.length() - 4);
+            }
+            String sanitized = segment.replaceAll("[^A-Za-z0-9._-]", "_");
+            return sanitized.isEmpty() ? fallback : sanitized;
+        } catch (Exception e) {
+            return fallback;
+        }
     }
 
     private File getVoiceListenerRootDir() {
@@ -417,7 +485,15 @@ public class VoiceListenerService extends Service {
     }
 
     private File getModelDirForUrl(String url) {
-        return new File(getModelsRootDir(), "model_" + hashUrl(normalizeModelUrl(url)));
+        return getModelDirForName(getModelNameFromUrl(url));
+    }
+
+    private File getModelDirForName(String modelName) {
+        String normalized = normalizeModelName(modelName);
+        if (normalized == null) {
+            return null;
+        }
+        return new File(getModelsRootDir(), normalized);
     }
 
     private boolean hasModelContent(File modelDir) {
@@ -429,11 +505,19 @@ public class VoiceListenerService extends Service {
     }
 
     private File resolvePreferredModelDir() {
-        String activeUrl = sharedPrefs != null ? sharedPrefs.getString(PREF_ACTIVE_MODEL_URL, null) : null;
-        if (activeUrl != null) {
-            File activeDir = getModelDirForUrl(activeUrl);
+        String activeModelName = sharedPrefs != null ? sharedPrefs.getString(PREF_ACTIVE_MODEL_NAME, null) : null;
+        if (activeModelName != null) {
+            File activeDir = getModelDirForName(activeModelName);
             if (hasModelContent(activeDir)) {
                 return activeDir;
+            }
+        }
+
+        String legacyActiveUrl = sharedPrefs != null ? sharedPrefs.getString(PREF_ACTIVE_MODEL_URL, null) : null;
+        if (legacyActiveUrl != null) {
+            File legacyActiveDir = getModelDirForUrl(legacyActiveUrl);
+            if (hasModelContent(legacyActiveDir)) {
+                return legacyActiveDir;
             }
         }
 
@@ -453,9 +537,9 @@ public class VoiceListenerService extends Service {
         return null;
     }
 
-    private boolean switchToModelUrl(String url, boolean persistSelection) {
-        String normalizedUrl = normalizeModelUrl(url);
-        File modelDir = getModelDirForUrl(normalizedUrl);
+    private boolean switchToModelName(String modelName, boolean persistSelection) {
+        String normalizedModelName = normalizeModelName(modelName);
+        File modelDir = getModelDirForName(normalizedModelName);
         if (!hasModelContent(modelDir)) {
             return false;
         }
@@ -468,24 +552,30 @@ public class VoiceListenerService extends Service {
 
         replaceAsrEngine(newEngine);
         if (persistSelection && sharedPrefs != null) {
-            sharedPrefs.edit().putString(PREF_ACTIVE_MODEL_URL, normalizedUrl).apply();
+            sharedPrefs.edit()
+                .putString(PREF_ACTIVE_MODEL_NAME, normalizedModelName)
+                .remove(PREF_ACTIVE_MODEL_URL)
+                .apply();
         }
         return true;
     }
 
-    private boolean deleteModelByUrl(String url) {
-        String normalizedUrl = normalizeModelUrl(url);
-        File modelDir = getModelDirForUrl(normalizedUrl);
-        if (!modelDir.exists()) {
+    private boolean deleteModelByName(String modelName) {
+        String normalizedModelName = normalizeModelName(modelName);
+        File modelDir = getModelDirForName(normalizedModelName);
+        if (modelDir == null || !modelDir.exists()) {
             return false;
         }
 
         deleteRecursively(modelDir);
         boolean deleted = !modelDir.exists();
         if (deleted && sharedPrefs != null) {
-            String activeUrl = sharedPrefs.getString(PREF_ACTIVE_MODEL_URL, null);
-            if (normalizedUrl.equals(activeUrl)) {
-                sharedPrefs.edit().remove(PREF_ACTIVE_MODEL_URL).apply();
+            String activeModelName = sharedPrefs.getString(PREF_ACTIVE_MODEL_NAME, null);
+            if (normalizedModelName.equals(activeModelName)) {
+                sharedPrefs.edit()
+                    .remove(PREF_ACTIVE_MODEL_NAME)
+                    .remove(PREF_ACTIVE_MODEL_URL)
+                    .apply();
                 initializeAsrEngine();
             }
         }
@@ -534,7 +624,7 @@ public class VoiceListenerService extends Service {
         }
     }
 
-    private boolean downloadFile(String urlStr, File destination) {
+    private boolean downloadFile(String urlStr, File destination, String modelName) {
         InputStream in = null;
         OutputStream out = null;
         HttpURLConnection conn = null;
@@ -552,10 +642,24 @@ public class VoiceListenerService extends Service {
 
             in = new BufferedInputStream(conn.getInputStream());
             out = new BufferedOutputStream(new FileOutputStream(destination));
+            long contentLength = conn.getContentLengthLong();
+            long downloaded = 0L;
+            int lastProgress = -2;
             byte[] buffer = new byte[8192];
             int len;
             while ((len = in.read(buffer)) != -1) {
                 out.write(buffer, 0, len);
+                downloaded += len;
+                if (contentLength > 0) {
+                    int progress = (int) Math.min(100L, (downloaded * 100L) / contentLength);
+                    if (progress != lastProgress) {
+                        lastProgress = progress;
+                        updateDownloadProgress(true, progress, modelName);
+                    }
+                } else if (lastProgress != -1) {
+                    lastProgress = -1;
+                    updateDownloadProgress(true, -1, modelName);
+                }
             }
             out.flush();
             return true;
@@ -567,6 +671,15 @@ public class VoiceListenerService extends Service {
             try { if (out != null) out.close(); } catch (IOException ignored) {}
             if (conn != null) conn.disconnect();
         }
+    }
+
+    private void updateDownloadProgress(boolean active, int progress, String modelName) {
+        if (sharedPrefs == null) return;
+        sharedPrefs.edit()
+            .putBoolean(PREF_MODEL_DOWNLOAD_ACTIVE, active)
+            .putInt(PREF_MODEL_DOWNLOAD_PROGRESS, progress)
+            .putString(PREF_MODEL_DOWNLOAD_NAME, modelName)
+            .apply();
     }
 
     private boolean unzipToDir(File zipFile, File outDir) {
@@ -733,11 +846,27 @@ public class VoiceListenerService extends Service {
             }
 
             short[] frame = Arrays.copyOf(readBuffer, readSamples);
+            publishCurrentRms(frame);
             short[] segment = vad.processFrame(frame);
             if (segment != null && segment.length > 0) {
                 submitForTranscription(segment);
             }
         }
+    }
+
+    private void publishCurrentRms(short[] frame) {
+        if (sharedPrefs == null || frame == null || frame.length == 0) return;
+        long now = System.currentTimeMillis();
+        if (now - lastRmsPublishMs < 120L) {
+            return;
+        }
+        lastRmsPublishMs = now;
+        double sum = 0.0;
+        for (short sample : frame) {
+            sum += sample * (double) sample;
+        }
+        float rms = (float) Math.sqrt(sum / frame.length);
+        sharedPrefs.edit().putFloat(PREF_CURRENT_RMS, rms).apply();
     }
 
     private void submitForTranscription(short[] segment) {
@@ -804,5 +933,6 @@ public class VoiceListenerService extends Service {
                 submitForTranscription(flushed);
             }
         }
+        try { if (sharedPrefs != null) sharedPrefs.edit().putFloat(PREF_CURRENT_RMS, 0f).apply(); } catch (Exception ignored) {}
     }
 }

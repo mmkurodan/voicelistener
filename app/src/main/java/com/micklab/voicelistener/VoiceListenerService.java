@@ -11,6 +11,7 @@ import android.content.pm.PackageManager;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
+import android.media.audiofx.NoiseSuppressor;
 import android.net.Uri;
 import android.os.Build;
 import android.os.Environment;
@@ -86,6 +87,7 @@ public class VoiceListenerService extends Service {
     private SharedPreferences.OnSharedPreferenceChangeListener prefsListener;
 
     private AudioRecord audioRecord;
+    private NoiseSuppressor noiseSuppressor;
     private Thread captureThread;
     private volatile boolean isCapturing = false;
     private long lastRmsPublishMs = 0L;
@@ -814,10 +816,13 @@ public class VoiceListenerService extends Service {
             return;
         }
 
+        enableNoiseSuppressor();
+
         try {
             audioRecord.startRecording();
         } catch (IllegalStateException | SecurityException e) {
             Log.e(TAG, "Failed to start recording", e);
+            releaseNoiseSuppressor();
             audioRecord.release();
             audioRecord = null;
             return;
@@ -923,6 +928,7 @@ public class VoiceListenerService extends Service {
             } catch (IllegalStateException e) {
                 Log.w(TAG, "AudioRecord stop failed", e);
             }
+            releaseNoiseSuppressor();
             audioRecord.release();
             audioRecord = null;
         }
@@ -934,5 +940,45 @@ public class VoiceListenerService extends Service {
             }
         }
         try { if (sharedPrefs != null) sharedPrefs.edit().putFloat(PREF_CURRENT_RMS, 0f).apply(); } catch (Exception ignored) {}
+    }
+
+    private void enableNoiseSuppressor() {
+        releaseNoiseSuppressor();
+        if (audioRecord == null) {
+            return;
+        }
+        if (!NoiseSuppressor.isAvailable()) {
+            Log.i(TAG, "NoiseSuppressor is not available on this device");
+            try { if (logManager != null) logManager.writeLog("NS未対応デバイス: VADのみで監視継続", false); } catch (Exception ignored) {}
+            return;
+        }
+        try {
+            noiseSuppressor = NoiseSuppressor.create(audioRecord.getAudioSessionId());
+            if (noiseSuppressor == null) {
+                Log.w(TAG, "NoiseSuppressor.create returned null");
+                try { if (logManager != null) logManager.writeLog("NS初期化失敗: VADのみで監視継続", false); } catch (Exception ignored) {}
+                return;
+            }
+            int status = noiseSuppressor.setEnabled(true);
+            Log.i(TAG, "NoiseSuppressor enabled=" + noiseSuppressor.getEnabled() + ", status=" + status);
+            try { if (logManager != null) logManager.writeLog("NS有効化: " + noiseSuppressor.getEnabled(), false); } catch (Exception ignored) {}
+        } catch (IllegalArgumentException | UnsupportedOperationException | IllegalStateException e) {
+            Log.w(TAG, "Failed to enable NoiseSuppressor", e);
+            try { if (logManager != null) logManager.writeLog("NS有効化例外: " + e.getMessage(), false); } catch (Exception ignored) {}
+            releaseNoiseSuppressor();
+        }
+    }
+
+    private void releaseNoiseSuppressor() {
+        if (noiseSuppressor == null) {
+            return;
+        }
+        try {
+            noiseSuppressor.release();
+        } catch (IllegalStateException e) {
+            Log.w(TAG, "NoiseSuppressor release failed", e);
+        } finally {
+            noiseSuppressor = null;
+        }
     }
 }

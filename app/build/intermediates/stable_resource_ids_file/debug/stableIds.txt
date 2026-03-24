@@ -1,0 +1,1 @@
+com.micklab.voicelistener:string/jna_library_appname = 0x7f010000

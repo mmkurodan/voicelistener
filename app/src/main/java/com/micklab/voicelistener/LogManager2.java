@@ -5,10 +5,14 @@ import android.content.SharedPreferences;
 import android.os.Environment;
 import android.util.Log;
 import java.io.File;
+import java.io.BufferedReader;
+import java.io.FileReader;
 import java.io.FileWriter;
 import java.io.IOException;
 import java.text.SimpleDateFormat;
+import java.util.ArrayDeque;
 import java.util.Date;
+import java.util.Deque;
 import java.util.Locale;
 import java.util.UUID;
 
@@ -108,7 +112,7 @@ public class LogManager2 {
                 lastLogFilePath = logFile.getAbsolutePath();
             }
 
-            String msgToWrite = message.replaceFirst("^認識[:：]\\s*", "");
+            String msgToWrite = message.trim();
             String currentMinute = minuteFormat.format(new Date());
 
             try (FileWriter writer = new FileWriter(logFile, true)) {
@@ -168,6 +172,82 @@ public class LogManager2 {
             }
         }
         return latest;
+    }
+
+    public synchronized String readLatestRecognitionLogTail(int maxEntries) {
+        if (maxEntries <= 0) {
+            return "";
+        }
+        File latestLogFile = getLatestLogFile();
+        if (latestLogFile == null || !latestLogFile.exists()) {
+            return "";
+        }
+
+        Deque<String> entries = new ArrayDeque<>(maxEntries);
+        try (BufferedReader reader = new BufferedReader(new FileReader(latestLogFile))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String normalized = normalizeRecognitionLine(line);
+                if (normalized == null) {
+                    continue;
+                }
+                if (entries.size() == maxEntries) {
+                    entries.removeFirst();
+                }
+                entries.addLast(normalized);
+            }
+        } catch (IOException e) {
+            Log.e(TAG, "認識ログ読み込みエラー", e);
+            return "";
+        }
+
+        StringBuilder builder = new StringBuilder();
+        for (String entry : entries) {
+            if (builder.length() > 0) {
+                builder.append('\n');
+            }
+            builder.append(entry);
+        }
+        return builder.toString();
+    }
+
+    private String normalizeRecognitionLine(String line) {
+        if (line == null) {
+            return null;
+        }
+        String trimmed = line.trim();
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+        if (trimmed.startsWith("[") && trimmed.endsWith("]")) {
+            return null;
+        }
+        if (trimmed.startsWith("認識:") || trimmed.startsWith("認識：")) {
+            String recognized = trimmed.substring(3).trim();
+            return recognized.isEmpty() ? null : recognized;
+        }
+        return isOperationalLogLine(trimmed) ? null : trimmed;
+    }
+
+    private boolean isOperationalLogLine(String line) {
+        String[] prefixes = {
+            "録音開始",
+            "権限",
+            "VAD",
+            "NS",
+            "モデル",
+            "監視",
+            "保留処理",
+            "Transcription",
+            "要約",
+            "Ollama"
+        };
+        for (String prefix : prefixes) {
+            if (line.startsWith(prefix)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     public void clearOldLogs(int daysToKeep) {

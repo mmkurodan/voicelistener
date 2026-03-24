@@ -8,6 +8,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.widget.AdapterView;
 import android.widget.Button;
 import android.widget.EditText;
 import android.widget.LinearLayout;
@@ -27,10 +28,15 @@ import java.io.FileInputStream;
 import java.io.FileReader;
 import java.io.IOException;
 import java.io.OutputStream;
+import java.text.SimpleDateFormat;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Deque;
+import java.util.List;
+import java.util.Locale;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
     
@@ -74,6 +80,17 @@ public class MainActivity extends Activity {
     private SeekBar volumeIndicatorSeekBar;
     private TextView volumeIndicatorLabel;
     private boolean wasModelDownloadActive = false;
+    private EditText ollamaBaseUrlInput;
+    private Spinner ollamaModelSpinner;
+    private ArrayAdapter<String> ollamaModelSpinnerAdapter;
+    private TextView summaryStatusText;
+    private EditText liveSummaryText;
+    private EditText liveDecisionsText;
+    private EditText liveTodosText;
+    private ExecutorService ollamaExecutor;
+    private final OllamaClient ollamaClient = new OllamaClient();
+    private final SimpleDateFormat summaryTimeFormat = new SimpleDateFormat("HH:mm:ss", Locale.JAPAN);
+    private boolean suppressOllamaSelectionCallback = false;
     
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -81,6 +98,7 @@ public class MainActivity extends Activity {
         
         logManager = new LogManager2(this);
         prefs = getSharedPreferences("VoiceListenerPrefs", MODE_PRIVATE);
+        ollamaExecutor = Executors.newSingleThreadExecutor();
         
         createUI();
         checkPermissions();
@@ -263,6 +281,74 @@ public class MainActivity extends Activity {
         });
         layout.addView(deleteModelButton);
 
+        TextView ollamaSectionLabel = new TextView(this);
+        ollamaSectionLabel.setText("Ollama互換要約");
+        ollamaSectionLabel.setTextSize(16);
+        ollamaSectionLabel.setPadding(0, 18, 0, 8);
+        layout.addView(ollamaSectionLabel);
+
+        ollamaBaseUrlInput = new EditText(this);
+        ollamaBaseUrlInput.setHint("http://10.0.2.2:11434");
+        ollamaBaseUrlInput.setText(LiveSummaryStore.getOllamaBaseUrl(this));
+        layout.addView(ollamaBaseUrlInput);
+
+        Button refreshOllamaModelsButton = new Button(this);
+        refreshOllamaModelsButton.setText("Ollamaモデル一覧取得");
+        refreshOllamaModelsButton.setOnClickListener(v -> fetchOllamaModels());
+        layout.addView(refreshOllamaModelsButton);
+
+        TextView ollamaModelLabel = new TextView(this);
+        ollamaModelLabel.setText("要約モデル:");
+        ollamaModelLabel.setPadding(0, 10, 0, 6);
+        layout.addView(ollamaModelLabel);
+
+        ollamaModelSpinner = new Spinner(this);
+        ollamaModelSpinnerAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, new ArrayList<>());
+        ollamaModelSpinnerAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        ollamaModelSpinner.setAdapter(ollamaModelSpinnerAdapter);
+        ollamaModelSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, android.view.View view, int position, long id) {
+                if (suppressOllamaSelectionCallback || ollamaModelSpinner.getSelectedItem() == null) {
+                    return;
+                }
+                LiveSummaryStore.setOllamaModel(MainActivity.this, String.valueOf(ollamaModelSpinner.getSelectedItem()));
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+        layout.addView(ollamaModelSpinner);
+
+        summaryStatusText = new TextView(this);
+        summaryStatusText.setPadding(0, 10, 0, 10);
+        layout.addView(summaryStatusText);
+
+        TextView liveSummaryLabel = new TextView(this);
+        liveSummaryLabel.setText("リアルタイム要約:");
+        liveSummaryLabel.setPadding(0, 4, 0, 6);
+        layout.addView(liveSummaryLabel);
+
+        liveSummaryText = createReadOnlyOutput(4);
+        layout.addView(liveSummaryText);
+
+        TextView liveDecisionsLabel = new TextView(this);
+        liveDecisionsLabel.setText("決定事項:");
+        liveDecisionsLabel.setPadding(0, 12, 0, 6);
+        layout.addView(liveDecisionsLabel);
+
+        liveDecisionsText = createReadOnlyOutput(4);
+        layout.addView(liveDecisionsText);
+
+        TextView liveTodosLabel = new TextView(this);
+        liveTodosLabel.setText("ToDo:");
+        liveTodosLabel.setPadding(0, 12, 0, 6);
+        layout.addView(liveTodosLabel);
+
+        liveTodosText = createReadOnlyOutput(4);
+        layout.addView(liveTodosText);
+
         // ログ初期化ボタン
         Button clearLogsButton = new Button(this);
         clearLogsButton.setText("ログ初期化");
@@ -312,13 +398,32 @@ public class MainActivity extends Activity {
         layout.addView(logScrollView);
 
         refreshModelSpinner(false);
+        refreshOllamaModelSpinner(false);
         updateDownloadProgressIndicator();
         updateVolumeIndicator();
+        updateSummaryDisplay();
 
         ScrollView rootScrollView = new ScrollView(this);
         rootScrollView.setFillViewport(true);
         rootScrollView.addView(layout);
         setContentView(rootScrollView);
+    }
+
+    private EditText createReadOnlyOutput(int minLines) {
+        EditText output = new EditText(this);
+        output.setTextSize(12);
+        output.setBackgroundColor(0xFFF3F3F3);
+        output.setTextColor(0xFF111111);
+        output.setPadding(10, 10, 10, 10);
+        output.setMinLines(minLines);
+        output.setMaxLines(minLines + 2);
+        output.setKeyListener(null);
+        output.setFocusable(false);
+        output.setCursorVisible(false);
+        output.setLongClickable(true);
+        output.setTextIsSelectable(true);
+        output.setHorizontallyScrolling(false);
+        return output;
     }
     
     private void checkPermissions() {
@@ -399,6 +504,12 @@ public class MainActivity extends Activity {
             return;
         }
 
+        saveOllamaBaseUrlFromInput();
+        String selectedOllamaModel = getSelectedOllamaModelName();
+        if (selectedOllamaModel != null) {
+            LiveSummaryStore.setOllamaModel(this, selectedOllamaModel);
+        }
+
         Intent serviceIntent = new Intent(this, VoiceListenerService.class);
         
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -475,6 +586,14 @@ public class MainActivity extends Activity {
         return selected.isEmpty() ? null : selected;
     }
 
+    private String getSelectedOllamaModelName() {
+        if (ollamaModelSpinner == null || ollamaModelSpinner.getSelectedItem() == null) {
+            return null;
+        }
+        String selected = String.valueOf(ollamaModelSpinner.getSelectedItem()).trim();
+        return selected.isEmpty() ? null : selected;
+    }
+
     private void refreshModelSpinner(boolean keepSelection) {
         if (modelSpinnerAdapter == null || modelSpinner == null) return;
 
@@ -502,6 +621,63 @@ public class MainActivity extends Activity {
             int index = selectedBefore != null ? modelNames.indexOf(selectedBefore) : -1;
             modelSpinner.setSelection(index >= 0 ? index : 0);
         }
+    }
+
+    private void refreshOllamaModelSpinner(boolean keepSelection) {
+        if (ollamaModelSpinnerAdapter == null || ollamaModelSpinner == null) return;
+
+        String selectedBefore = keepSelection ? getSelectedOllamaModelName() : null;
+        String savedModel = LiveSummaryStore.getOllamaModel(this);
+        ArrayList<String> modelNames = LiveSummaryStore.getCachedModelNames(this);
+        if (!modelNames.contains(savedModel)) {
+            modelNames.add(savedModel);
+        }
+
+        suppressOllamaSelectionCallback = true;
+        ollamaModelSpinnerAdapter.clear();
+        ollamaModelSpinnerAdapter.addAll(modelNames);
+        ollamaModelSpinnerAdapter.notifyDataSetChanged();
+
+        if (!modelNames.isEmpty()) {
+            String target = selectedBefore != null ? selectedBefore : savedModel;
+            int index = modelNames.indexOf(target);
+            ollamaModelSpinner.setSelection(index >= 0 ? index : 0);
+        }
+        suppressOllamaSelectionCallback = false;
+    }
+
+    private void saveOllamaBaseUrlFromInput() {
+        if (ollamaBaseUrlInput == null) return;
+        LiveSummaryStore.setOllamaBaseUrl(this, ollamaBaseUrlInput.getText().toString());
+    }
+
+    private void ensureOllamaExecutor() {
+        if (ollamaExecutor == null || ollamaExecutor.isShutdown()) {
+            ollamaExecutor = Executors.newSingleThreadExecutor();
+        }
+    }
+
+    private void fetchOllamaModels() {
+        saveOllamaBaseUrlFromInput();
+        ensureOllamaExecutor();
+        String baseUrl = LiveSummaryStore.getOllamaBaseUrl(this);
+        Toast.makeText(this, "Ollamaモデル一覧を取得しています", Toast.LENGTH_SHORT).show();
+        ollamaExecutor.execute(() -> {
+            try {
+                List<String> models = new ArrayList<>(ollamaClient.listModelNames(baseUrl));
+                String currentModel = LiveSummaryStore.getOllamaModel(this);
+                if (!models.contains(currentModel)) {
+                    models.add(currentModel);
+                }
+                LiveSummaryStore.setCachedModelNames(this, models);
+                runOnUiThread(() -> {
+                    refreshOllamaModelSpinner(true);
+                    Toast.makeText(this, "Ollamaモデル一覧を更新しました", Toast.LENGTH_SHORT).show();
+                });
+            } catch (IOException e) {
+                runOnUiThread(() -> Toast.makeText(this, "Ollamaモデル一覧取得失敗: " + e.getMessage(), Toast.LENGTH_LONG).show());
+            }
+        });
     }
 
     private void updateDownloadProgressIndicator() {
@@ -534,6 +710,37 @@ public class MainActivity extends Activity {
             refreshModelSpinner(true);
         }
         wasModelDownloadActive = active;
+    }
+
+    private void updateSummaryDisplay() {
+        if (summaryStatusText == null || liveSummaryText == null || liveDecisionsText == null || liveTodosText == null) {
+            return;
+        }
+        LiveSummaryState state = LiveSummaryStore.loadSummaryState(this);
+        String summary = state.getSummary().isEmpty() ? "要約はまだありません" : state.getSummary();
+        liveSummaryText.setText(summary);
+        liveDecisionsText.setText(formatList(state.getDecisions(), "決定事項はまだありません"));
+        liveTodosText.setText(formatList(state.getTodos(), "ToDoはまだありません"));
+
+        String status = state.getStatus().isEmpty() ? "要約待機中" : state.getStatus();
+        if (state.getUpdatedAtMillis() > 0L) {
+            status = status + " (" + summaryTimeFormat.format(new java.util.Date(state.getUpdatedAtMillis())) + ")";
+        }
+        summaryStatusText.setText("要約状態: " + status);
+    }
+
+    private String formatList(List<String> values, String emptyMessage) {
+        if (values == null || values.isEmpty()) {
+            return emptyMessage;
+        }
+        StringBuilder builder = new StringBuilder();
+        for (String value : values) {
+            if (builder.length() > 0) {
+                builder.append('\n');
+            }
+            builder.append("・").append(value);
+        }
+        return builder.toString();
     }
 
     private void updateVolumeIndicator() {
@@ -674,8 +881,10 @@ public class MainActivity extends Activity {
         updateLogDisplay();
         updateStatusFromPrefs();
         refreshModelSpinner(true);
+        refreshOllamaModelSpinner(true);
         updateDownloadProgressIndicator();
         updateVolumeIndicator();
+        updateSummaryDisplay();
         // 定期更新を開始
         if (uiHandler == null) uiHandler = new Handler(Looper.getMainLooper());
         if (periodicUpdateRunnable == null) {
@@ -685,6 +894,7 @@ public class MainActivity extends Activity {
                     try {
                         updateLogDisplay();
                         updateStatusFromPrefs();
+                        updateSummaryDisplay();
                     } catch (Exception ignored) {}
                     uiHandler.postDelayed(this, UPDATE_INTERVAL_MS);
                 }
@@ -714,6 +924,15 @@ public class MainActivity extends Activity {
         }
         if (uiHandler != null && indicatorUpdateRunnable != null) {
             uiHandler.removeCallbacks(indicatorUpdateRunnable);
+        }
+    }
+
+    @Override
+    protected void onDestroy() {
+        super.onDestroy();
+        if (ollamaExecutor != null) {
+            ollamaExecutor.shutdownNow();
+            ollamaExecutor = null;
         }
     }
 }

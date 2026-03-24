@@ -11,11 +11,15 @@ import android.content.pm.PackageManager;
 import android.media.AudioFormat;
 import android.media.AudioRecord;
 import android.media.MediaRecorder;
+import android.media.audiofx.AcousticEchoCanceler;
+import android.media.audiofx.AutomaticGainControl;
 import android.media.audiofx.NoiseSuppressor;
 import android.net.Uri;
+import android.net.wifi.WifiManager;
 import android.os.Build;
 import android.os.Environment;
 import android.os.IBinder;
+import android.os.PowerManager;
 import android.util.Log;
 import java.io.BufferedInputStream;
 import java.io.BufferedOutputStream;
@@ -35,6 +39,8 @@ import java.util.Locale;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.TimeUnit;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
@@ -52,6 +58,8 @@ public class VoiceListenerService extends Service {
     private static final int MAX_SILENCE_FRAMES = 15;
     private static final int MIN_SPEECH_FRAMES = 8;
     private static final double RMS_THRESHOLD = 900.0;
+    private static final long SUMMARY_DEBOUNCE_MS = 4000L;
+    private static final int MAX_SUMMARY_LOG_LINES = 120;
 
     private static final String LEGACY_VOSK_MODEL_FOLDER = "vosk-model-ja";
     private static final String MODELS_FOLDER = "models";
@@ -83,14 +91,23 @@ public class VoiceListenerService extends Service {
     private OfflineAsrEngine asrEngine;
     private ExecutorService transcriptionExecutor;
     private ExecutorService modelInstallerExecutor;
+    private ScheduledExecutorService summaryExecutor;
     private SharedPreferences sharedPrefs;
     private SharedPreferences.OnSharedPreferenceChangeListener prefsListener;
+    private final OllamaClient ollamaClient = new OllamaClient();
 
     private AudioRecord audioRecord;
     private NoiseSuppressor noiseSuppressor;
+    private AutomaticGainControl automaticGainControl;
+    private AcousticEchoCanceler acousticEchoCanceler;
     private Thread captureThread;
     private volatile boolean isCapturing = false;
     private long lastRmsPublishMs = 0L;
+    private PowerManager.WakeLock cpuWakeLock;
+    private WifiManager.WifiLock wifiWakeLock;
+    private ScheduledFuture<?> pendingSummaryFuture;
+    private String lastSummaryInputHash;
+    private int activeAudioSource = MediaRecorder.AudioSource.MIC;
 
     @Override
     public void onCreate() {
@@ -120,8 +137,10 @@ public class VoiceListenerService extends Service {
 
         transcriptionExecutor = Executors.newSingleThreadExecutor();
         modelInstallerExecutor = Executors.newSingleThreadExecutor();
+        summaryExecutor = Executors.newSingleThreadScheduledExecutor();
 
         createNotificationChannel();
+        initializeRunLocks();
         initializeAsrEngine();
     }
 
@@ -185,6 +204,9 @@ public class VoiceListenerService extends Service {
                         if (!terminated) {
                             drainingExecutor.shutdownNow();
                         }
+                        cancelPendingSummaryTask();
+                        shutdownSummaryExecutor(true);
+                        refreshLiveSummary(true);
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         try { if (logManager != null) logManager.writeLog("監視停止待機中に割込: " + e.getMessage(), false); } catch (Exception ignored) {}
@@ -199,9 +221,15 @@ public class VoiceListenerService extends Service {
                     }
                 });
             } else {
-                try { if (logManager != null) logManager.writeLog("保留処理なし、サービスを停止します", false); } catch (Exception ignored) {}
-                try { if (sharedPrefs != null) sharedPrefs.edit().putString(PREF_MON_STATE, MON_STATE_STOPPED).apply(); } catch (Exception ignored) {}
-                stopSelf();
+                if (modelInstallerExecutor == null) modelInstallerExecutor = Executors.newSingleThreadExecutor();
+                modelInstallerExecutor.execute(() -> {
+                    cancelPendingSummaryTask();
+                    shutdownSummaryExecutor(true);
+                    refreshLiveSummary(true);
+                    try { if (logManager != null) logManager.writeLog("保留処理なし、サービスを停止します", false); } catch (Exception ignored) {}
+                    try { if (sharedPrefs != null) sharedPrefs.edit().putString(PREF_MON_STATE, MON_STATE_STOPPED).apply(); } catch (Exception ignored) {}
+                    stopSelf();
+                });
             }
         } else {
             startAudioCapture();
@@ -216,6 +244,8 @@ public class VoiceListenerService extends Service {
         Log.d(TAG, "VoiceListenerService destroyed");
 
         stopAudioCapture();
+        cancelPendingSummaryTask();
+        shutdownSummaryExecutor(false);
 
         if (transcriptionExecutor != null) {
             transcriptionExecutor.shutdownNow();
@@ -285,11 +315,59 @@ public class VoiceListenerService extends Service {
         
         return builder
             .setContentTitle("音声監視中")
-            .setContentText("AudioRecordでオフライン監視を実行中")
+            .setContentText("AudioRecordでスリープ中も監視を継続中")
             .setSmallIcon(android.R.drawable.ic_btn_speak_now)
             .setContentIntent(pendingIntent)
             .setOngoing(true)
             .build();
+    }
+
+    private void initializeRunLocks() {
+        PowerManager powerManager = getSystemService(PowerManager.class);
+        if (powerManager != null) {
+            cpuWakeLock = powerManager.newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, TAG + ":cpu");
+            cpuWakeLock.setReferenceCounted(false);
+        }
+
+        WifiManager wifiManager = (WifiManager) getApplicationContext().getSystemService(WIFI_SERVICE);
+        if (wifiManager != null) {
+            wifiWakeLock = wifiManager.createWifiLock(WifiManager.WIFI_MODE_FULL_HIGH_PERF, TAG + ":wifi");
+            wifiWakeLock.setReferenceCounted(false);
+        }
+    }
+
+    private void acquireRunLocks() {
+        try {
+            if (cpuWakeLock != null && !cpuWakeLock.isHeld()) {
+                cpuWakeLock.acquire();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to acquire CPU wake lock", e);
+        }
+        try {
+            if (wifiWakeLock != null && !wifiWakeLock.isHeld()) {
+                wifiWakeLock.acquire();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to acquire Wi-Fi lock", e);
+        }
+    }
+
+    private void releaseRunLocks() {
+        try {
+            if (cpuWakeLock != null && cpuWakeLock.isHeld()) {
+                cpuWakeLock.release();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to release CPU wake lock", e);
+        }
+        try {
+            if (wifiWakeLock != null && wifiWakeLock.isHeld()) {
+                wifiWakeLock.release();
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Failed to release Wi-Fi lock", e);
+        }
     }
 
     private void initializeAsrEngine() {
@@ -612,6 +690,102 @@ public class VoiceListenerService extends Service {
         }
     }
 
+    private void ensureSummaryExecutor() {
+        if (summaryExecutor == null || summaryExecutor.isShutdown() || summaryExecutor.isTerminated()) {
+            summaryExecutor = Executors.newSingleThreadScheduledExecutor();
+        }
+    }
+
+    private void scheduleSummaryRefresh() {
+        ensureSummaryExecutor();
+        cancelPendingSummaryTask();
+        pendingSummaryFuture = summaryExecutor.schedule(() -> {
+            pendingSummaryFuture = null;
+            refreshLiveSummary(false);
+        }, SUMMARY_DEBOUNCE_MS, TimeUnit.MILLISECONDS);
+    }
+
+    private void cancelPendingSummaryTask() {
+        if (pendingSummaryFuture == null) {
+            return;
+        }
+        pendingSummaryFuture.cancel(false);
+        pendingSummaryFuture = null;
+    }
+
+    private void shutdownSummaryExecutor(boolean awaitTermination) {
+        if (summaryExecutor == null) {
+            return;
+        }
+        try {
+            if (awaitTermination) {
+                summaryExecutor.shutdown();
+                if (!summaryExecutor.awaitTermination(150, TimeUnit.SECONDS)) {
+                    summaryExecutor.shutdownNow();
+                }
+            } else {
+                summaryExecutor.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            summaryExecutor.shutdownNow();
+        } finally {
+            summaryExecutor = null;
+        }
+    }
+
+    private void refreshLiveSummary(boolean force) {
+        if (logManager == null) {
+            return;
+        }
+
+        String recognitionTail = logManager.readLatestRecognitionLogTail(MAX_SUMMARY_LOG_LINES).trim();
+        LiveSummaryState previousState = LiveSummaryStore.loadSummaryState(this);
+        if (recognitionTail.isEmpty()) {
+            LiveSummaryStore.saveSummaryState(this, new LiveSummaryState(
+                previousState.getSummary(),
+                previousState.getDecisions(),
+                previousState.getTodos(),
+                "要約待機中",
+                previousState.getUpdatedAtMillis()
+            ));
+            return;
+        }
+
+        String sourceHash = hashText(recognitionTail);
+        if (!force && sourceHash.equals(lastSummaryInputHash)) {
+            return;
+        }
+
+        try {
+            LiveSummaryState response = ollamaClient.generateSummary(
+                LiveSummaryStore.getOllamaBaseUrl(this),
+                LiveSummaryStore.getOllamaModel(this),
+                recognitionTail,
+                previousState
+            );
+            long updatedAt = System.currentTimeMillis();
+            LiveSummaryStore.saveSummaryState(this, new LiveSummaryState(
+                response.getSummary(),
+                response.getDecisions(),
+                response.getTodos(),
+                "要約更新済み",
+                updatedAt
+            ));
+            lastSummaryInputHash = sourceHash;
+        } catch (IOException e) {
+            String errorMessage = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            try { if (logManager != null) logManager.writeLog("要約更新失敗: " + errorMessage, false); } catch (Exception ignored) {}
+            LiveSummaryStore.saveSummaryState(this, new LiveSummaryState(
+                previousState.getSummary(),
+                previousState.getDecisions(),
+                previousState.getTodos(),
+                "要約更新失敗: " + errorMessage,
+                previousState.getUpdatedAtMillis()
+            ));
+        }
+    }
+
     private String hashUrl(String url) {
         try {
             MessageDigest digest = MessageDigest.getInstance("SHA-256");
@@ -623,6 +797,20 @@ public class VoiceListenerService extends Service {
             return sb.toString();
         } catch (Exception e) {
             return Integer.toHexString(url.hashCode());
+        }
+    }
+
+    private String hashText(String text) {
+        try {
+            MessageDigest digest = MessageDigest.getInstance("SHA-256");
+            byte[] hash = digest.digest(text.getBytes(StandardCharsets.UTF_8));
+            StringBuilder sb = new StringBuilder();
+            for (int i = 0; i < 12 && i < hash.length; i++) {
+                sb.append(String.format("%02x", hash[i]));
+            }
+            return sb.toString();
+        } catch (Exception e) {
+            return Integer.toHexString(text.hashCode());
         }
     }
 
@@ -760,6 +948,7 @@ public class VoiceListenerService extends Service {
             return;
         }
         ensureTranscriptionExecutor();
+        ensureSummaryExecutor();
         if (asrEngine == null || (asrEngine instanceof NoOpOfflineAsrEngine)) {
             initializeAsrEngine();
         }
@@ -801,28 +990,21 @@ public class VoiceListenerService extends Service {
         }
 
         int recordBufferBytes = Math.max(minBufferBytes * 2, FRAME_SAMPLES * 2 * 4);
-        audioRecord = new AudioRecord(
-            MediaRecorder.AudioSource.MIC,
-            SAMPLE_RATE_HZ,
-            CHANNEL_CONFIG,
-            AUDIO_FORMAT,
-            recordBufferBytes
-        );
-
-        if (audioRecord.getState() != AudioRecord.STATE_INITIALIZED) {
-            Log.e(TAG, "AudioRecord initialization failed");
-            audioRecord.release();
-            audioRecord = null;
+        audioRecord = createAudioRecord(recordBufferBytes);
+        if (audioRecord == null) {
+            Log.e(TAG, "AudioRecord initialization failed for all audio sources");
             return;
         }
 
-        enableNoiseSuppressor();
+        enableAudioEffects();
+        acquireRunLocks();
 
         try {
             audioRecord.startRecording();
         } catch (IllegalStateException | SecurityException e) {
             Log.e(TAG, "Failed to start recording", e);
-            releaseNoiseSuppressor();
+            releaseAudioEffects();
+            releaseRunLocks();
             audioRecord.release();
             audioRecord = null;
             return;
@@ -831,10 +1013,9 @@ public class VoiceListenerService extends Service {
         isCapturing = true;
         captureThread = new Thread(this::captureLoop, "AudioCaptureThread");
         captureThread.start();
-        Log.i(TAG, "AudioRecord capture started");
-        // set running state
+        Log.i(TAG, "AudioRecord capture started: " + audioSourceLabel(activeAudioSource));
         try { if (sharedPrefs != null) sharedPrefs.edit().putString(PREF_MON_STATE, MON_STATE_RUNNING).apply(); } catch (Exception ignored) {}
-        try { if (logManager != null) logManager.writeLog("録音開始"); } catch (Exception ignored) {}
+        try { if (logManager != null) logManager.writeLog("録音開始 (" + audioSourceLabel(activeAudioSource) + ")"); } catch (Exception ignored) {}
     }
 
     private void captureLoop() {
@@ -883,10 +1064,12 @@ public class VoiceListenerService extends Service {
                 OfflineAsrEngine engine = asrEngine; // snapshot to avoid race with shutdown
                 if (engine == null) return;
                 String recognizedText = engine.transcribe(segment, SAMPLE_RATE_HZ);
-                if (recognizedText != null && !recognizedText.trim().isEmpty()) {
+                String normalizedText = recognizedText == null ? "" : recognizedText.replaceAll("\\s+", " ").trim();
+                if (!normalizedText.isEmpty()) {
                     if (logManager != null) {
-                        try { logManager.writeLog("認識: " + recognizedText.trim()); } catch (Exception ignored) {}
+                        try { logManager.writeLog("認識: " + normalizedText); } catch (Exception ignored) {}
                     }
+                    scheduleSummaryRefresh();
                 }
             } catch (Exception e) {
                 Log.e(TAG, "Transcription task failed", e);
@@ -911,15 +1094,6 @@ public class VoiceListenerService extends Service {
     private void stopAudioCapture() {
         isCapturing = false;
 
-        if (captureThread != null) {
-            try {
-                captureThread.join(500);
-            } catch (InterruptedException e) {
-                Thread.currentThread().interrupt();
-            }
-            captureThread = null;
-        }
-
         if (audioRecord != null) {
             try {
                 if (audioRecord.getRecordingState() == AudioRecord.RECORDSTATE_RECORDING) {
@@ -928,10 +1102,23 @@ public class VoiceListenerService extends Service {
             } catch (IllegalStateException e) {
                 Log.w(TAG, "AudioRecord stop failed", e);
             }
-            releaseNoiseSuppressor();
+        }
+
+        if (captureThread != null) {
+            try {
+                captureThread.join(1000);
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+            }
+            captureThread = null;
+        }
+
+        if (audioRecord != null) {
+            releaseAudioEffects();
             audioRecord.release();
             audioRecord = null;
         }
+        releaseRunLocks();
 
         if (vad != null) {
             short[] flushed = vad.flush();
@@ -942,8 +1129,117 @@ public class VoiceListenerService extends Service {
         try { if (sharedPrefs != null) sharedPrefs.edit().putFloat(PREF_CURRENT_RMS, 0f).apply(); } catch (Exception ignored) {}
     }
 
-    private void enableNoiseSuppressor() {
+    private AudioRecord createAudioRecord(int recordBufferBytes) {
+        int[] candidates = {
+            MediaRecorder.AudioSource.VOICE_RECOGNITION,
+            MediaRecorder.AudioSource.MIC
+        };
+        for (int source : candidates) {
+            AudioRecord candidate = null;
+            try {
+                candidate = new AudioRecord(
+                    source,
+                    SAMPLE_RATE_HZ,
+                    CHANNEL_CONFIG,
+                    AUDIO_FORMAT,
+                    recordBufferBytes
+                );
+                if (candidate.getState() == AudioRecord.STATE_INITIALIZED) {
+                    activeAudioSource = source;
+                    return candidate;
+                }
+            } catch (IllegalArgumentException e) {
+                Log.w(TAG, "AudioRecord create failed for source=" + source, e);
+            }
+            if (candidate != null) {
+                try { candidate.release(); } catch (Exception ignored) {}
+            }
+        }
+        return null;
+    }
+
+    private String audioSourceLabel(int source) {
+        if (source == MediaRecorder.AudioSource.VOICE_RECOGNITION) {
+            return "VOICE_RECOGNITION";
+        }
+        if (source == MediaRecorder.AudioSource.MIC) {
+            return "MIC";
+        }
+        return "source=" + source;
+    }
+
+    private void enableAudioEffects() {
+        releaseAudioEffects();
+        enableAutomaticGainControl();
+        enableAcousticEchoCanceler();
+        enableNoiseSuppressor();
+    }
+
+    private void releaseAudioEffects() {
+        releaseAutomaticGainControl();
+        releaseAcousticEchoCanceler();
         releaseNoiseSuppressor();
+    }
+
+    private void enableAutomaticGainControl() {
+        if (audioRecord == null || !AutomaticGainControl.isAvailable()) {
+            return;
+        }
+        try {
+            automaticGainControl = AutomaticGainControl.create(audioRecord.getAudioSessionId());
+            if (automaticGainControl != null) {
+                automaticGainControl.setEnabled(true);
+                try { if (logManager != null) logManager.writeLog("AGC有効化: " + automaticGainControl.getEnabled(), false); } catch (Exception ignored) {}
+            }
+        } catch (IllegalArgumentException | UnsupportedOperationException | IllegalStateException e) {
+            Log.w(TAG, "Failed to enable AutomaticGainControl", e);
+            releaseAutomaticGainControl();
+        }
+    }
+
+    private void releaseAutomaticGainControl() {
+        if (automaticGainControl == null) {
+            return;
+        }
+        try {
+            automaticGainControl.release();
+        } catch (IllegalStateException e) {
+            Log.w(TAG, "AutomaticGainControl release failed", e);
+        } finally {
+            automaticGainControl = null;
+        }
+    }
+
+    private void enableAcousticEchoCanceler() {
+        if (audioRecord == null || !AcousticEchoCanceler.isAvailable()) {
+            return;
+        }
+        try {
+            acousticEchoCanceler = AcousticEchoCanceler.create(audioRecord.getAudioSessionId());
+            if (acousticEchoCanceler != null) {
+                acousticEchoCanceler.setEnabled(true);
+                try { if (logManager != null) logManager.writeLog("AEC有効化: " + acousticEchoCanceler.getEnabled(), false); } catch (Exception ignored) {}
+            }
+        } catch (IllegalArgumentException | UnsupportedOperationException | IllegalStateException e) {
+            Log.w(TAG, "Failed to enable AcousticEchoCanceler", e);
+            releaseAcousticEchoCanceler();
+        }
+    }
+
+    private void releaseAcousticEchoCanceler() {
+        if (acousticEchoCanceler == null) {
+            return;
+        }
+        try {
+            acousticEchoCanceler.release();
+        } catch (IllegalStateException e) {
+            Log.w(TAG, "AcousticEchoCanceler release failed", e);
+        } finally {
+            acousticEchoCanceler = null;
+        }
+    }
+
+    private void enableNoiseSuppressor() {
         if (audioRecord == null) {
             return;
         }
@@ -959,8 +1255,7 @@ public class VoiceListenerService extends Service {
                 try { if (logManager != null) logManager.writeLog("NS初期化失敗: VADのみで監視継続", false); } catch (Exception ignored) {}
                 return;
             }
-            int status = noiseSuppressor.setEnabled(true);
-            Log.i(TAG, "NoiseSuppressor enabled=" + noiseSuppressor.getEnabled() + ", status=" + status);
+            noiseSuppressor.setEnabled(true);
             try { if (logManager != null) logManager.writeLog("NS有効化: " + noiseSuppressor.getEnabled(), false); } catch (Exception ignored) {}
         } catch (IllegalArgumentException | UnsupportedOperationException | IllegalStateException e) {
             Log.w(TAG, "Failed to enable NoiseSuppressor", e);

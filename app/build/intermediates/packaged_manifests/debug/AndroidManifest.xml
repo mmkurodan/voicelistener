@@ -28,7 +28,8 @@
         android:debuggable="true"
         android:extractNativeLibs="false"
         android:label="voicelistener"
-        android:theme="@android:style/Theme.Material.Light" >
+        android:theme="@android:style/Theme.Material.Light"
+        android:usesCleartextTraffic="true" >
         <activity
             android:name="com.micklab.voicelistener.MainActivity"
             android:exported="true" >
@@ -38,6 +39,9 @@
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+        <activity
+            android:name="com.micklab.voicelistener.SummaryActivity"
+            android:exported="false" />
 
         <!-- 音声監視サービス -->
         <service

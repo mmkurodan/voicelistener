@@ -8,6 +8,7 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.text.InputType;
 import android.text.method.ScrollingMovementMethod;
 import android.view.MotionEvent;
 import android.view.View;
@@ -85,10 +86,8 @@ public class MainActivity extends Activity {
     private EditText ollamaBaseUrlInput;
     private Spinner ollamaModelSpinner;
     private ArrayAdapter<String> ollamaModelSpinnerAdapter;
+    private EditText summaryForceCharsInput;
     private TextView summaryStatusText;
-    private EditText liveSummaryText;
-    private EditText liveDecisionsText;
-    private EditText liveTodosText;
     private ExecutorService ollamaExecutor;
     private final OllamaClient ollamaClient = new OllamaClient();
     private final SimpleDateFormat summaryTimeFormat = new SimpleDateFormat("HH:mm:ss", Locale.JAPAN);
@@ -323,33 +322,28 @@ public class MainActivity extends Activity {
         });
         layout.addView(ollamaModelSpinner);
 
+        TextView summaryThresholdLabel = new TextView(this);
+        summaryThresholdLabel.setText("強制要約文字数:");
+        summaryThresholdLabel.setPadding(0, 10, 0, 6);
+        layout.addView(summaryThresholdLabel);
+
+        summaryForceCharsInput = new EditText(this);
+        summaryForceCharsInput.setInputType(InputType.TYPE_CLASS_NUMBER);
+        summaryForceCharsInput.setHint(String.valueOf(LiveSummaryStore.getSummaryForceCharThreshold(this)));
+        summaryForceCharsInput.setText(String.valueOf(LiveSummaryStore.getSummaryForceCharThreshold(this)));
+        layout.addView(summaryForceCharsInput);
+
         summaryStatusText = new TextView(this);
         summaryStatusText.setPadding(0, 10, 0, 10);
         layout.addView(summaryStatusText);
 
-        TextView liveSummaryLabel = new TextView(this);
-        liveSummaryLabel.setText("リアルタイム要約:");
-        liveSummaryLabel.setPadding(0, 4, 0, 6);
-        layout.addView(liveSummaryLabel);
-
-        liveSummaryText = createReadOnlyOutput(4);
-        layout.addView(liveSummaryText);
-
-        TextView liveDecisionsLabel = new TextView(this);
-        liveDecisionsLabel.setText("決定事項:");
-        liveDecisionsLabel.setPadding(0, 12, 0, 6);
-        layout.addView(liveDecisionsLabel);
-
-        liveDecisionsText = createReadOnlyOutput(4);
-        layout.addView(liveDecisionsText);
-
-        TextView liveTodosLabel = new TextView(this);
-        liveTodosLabel.setText("ToDo:");
-        liveTodosLabel.setPadding(0, 12, 0, 6);
-        layout.addView(liveTodosLabel);
-
-        liveTodosText = createReadOnlyOutput(4);
-        layout.addView(liveTodosText);
+        Button openSummaryButton = new Button(this);
+        openSummaryButton.setText("要約画面を開く");
+        openSummaryButton.setOnClickListener(v -> {
+            saveSummarySettingsFromInputs();
+            startActivity(new Intent(this, SummaryActivity.class));
+        });
+        layout.addView(openSummaryButton);
 
         // ログ初期化ボタン
         Button clearLogsButton = new Button(this);
@@ -398,23 +392,6 @@ public class MainActivity extends Activity {
         rootScrollView.setFillViewport(true);
         rootScrollView.addView(layout);
         setContentView(rootScrollView);
-    }
-
-    private EditText createReadOnlyOutput(int minLines) {
-        EditText output = new EditText(this);
-        output.setTextSize(12);
-        output.setBackgroundColor(0xFFF3F3F3);
-        output.setTextColor(0xFF111111);
-        output.setPadding(10, 10, 10, 10);
-        output.setMinLines(minLines);
-        output.setMaxLines(minLines + 2);
-        output.setKeyListener(null);
-        output.setFocusable(false);
-        output.setCursorVisible(false);
-        output.setLongClickable(true);
-        output.setTextIsSelectable(true);
-        output.setHorizontallyScrolling(false);
-        return output;
     }
 
     private void configureReadOnlyLogTextArea(EditText textArea, int heightPx) {
@@ -554,7 +531,7 @@ public class MainActivity extends Activity {
             return;
         }
 
-        saveOllamaBaseUrlFromInput();
+        saveSummarySettingsFromInputs();
         String selectedOllamaModel = getSelectedOllamaModelName();
         if (selectedOllamaModel != null) {
             LiveSummaryStore.setOllamaModel(this, selectedOllamaModel);
@@ -701,6 +678,34 @@ public class MainActivity extends Activity {
         LiveSummaryStore.setOllamaBaseUrl(this, ollamaBaseUrlInput.getText().toString());
     }
 
+    private void saveSummaryForceCharsFromInput() {
+        if (summaryForceCharsInput == null) return;
+        String raw = String.valueOf(summaryForceCharsInput.getText()).trim();
+        int threshold = LiveSummaryStore.getSummaryForceCharThreshold(this);
+        if (!raw.isEmpty()) {
+            try {
+                threshold = Integer.parseInt(raw);
+            } catch (NumberFormatException ignored) {
+            }
+        }
+        LiveSummaryStore.setSummaryForceCharThreshold(this, threshold);
+        summaryForceCharsInput.setText(String.valueOf(LiveSummaryStore.getSummaryForceCharThreshold(this)));
+    }
+
+    private void saveSummarySettingsFromInputs() {
+        saveOllamaBaseUrlFromInput();
+        saveSummaryForceCharsFromInput();
+    }
+
+    private void syncSummarySettingsInputs() {
+        if (summaryForceCharsInput != null) {
+            summaryForceCharsInput.setText(String.valueOf(LiveSummaryStore.getSummaryForceCharThreshold(this)));
+        }
+        if (ollamaBaseUrlInput != null) {
+            ollamaBaseUrlInput.setText(LiveSummaryStore.getOllamaBaseUrl(this));
+        }
+    }
+
     private void ensureOllamaExecutor() {
         if (ollamaExecutor == null || ollamaExecutor.isShutdown()) {
             ollamaExecutor = Executors.newSingleThreadExecutor();
@@ -763,34 +768,19 @@ public class MainActivity extends Activity {
     }
 
     private void updateSummaryDisplay() {
-        if (summaryStatusText == null || liveSummaryText == null || liveDecisionsText == null || liveTodosText == null) {
+        if (summaryStatusText == null) {
             return;
         }
         LiveSummaryState state = LiveSummaryStore.loadSummaryState(this);
-        String summary = state.getSummary().isEmpty() ? "要約はまだありません" : state.getSummary();
-        liveSummaryText.setText(summary);
-        liveDecisionsText.setText(formatList(state.getDecisions(), "決定事項はまだありません"));
-        liveTodosText.setText(formatList(state.getTodos(), "ToDoはまだありません"));
-
         String status = state.getStatus().isEmpty() ? "要約待機中" : state.getStatus();
+        int pendingChars = LiveSummaryStore.getPendingSummaryLogCharCount(this);
+        if (pendingChars > 0) {
+            status = status + " / 未要約ログ: " + pendingChars + "文字";
+        }
         if (state.getUpdatedAtMillis() > 0L) {
             status = status + " (" + summaryTimeFormat.format(new java.util.Date(state.getUpdatedAtMillis())) + ")";
         }
         summaryStatusText.setText("要約状態: " + status);
-    }
-
-    private String formatList(List<String> values, String emptyMessage) {
-        if (values == null || values.isEmpty()) {
-            return emptyMessage;
-        }
-        StringBuilder builder = new StringBuilder();
-        for (String value : values) {
-            if (builder.length() > 0) {
-                builder.append('\n');
-            }
-            builder.append("・").append(value);
-        }
-        return builder.toString();
     }
 
     private void updateVolumeIndicator() {
@@ -929,6 +919,7 @@ public class MainActivity extends Activity {
         updateStatusFromPrefs();
         refreshModelSpinner(true);
         refreshOllamaModelSpinner(true);
+        syncSummarySettingsInputs();
         updateDownloadProgressIndicator();
         updateVolumeIndicator();
         updateSummaryDisplay();
@@ -966,6 +957,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        saveSummarySettingsFromInputs();
         if (uiHandler != null && periodicUpdateRunnable != null) {
             uiHandler.removeCallbacks(periodicUpdateRunnable);
         }

@@ -33,6 +33,10 @@
 
         </activity>
 
+        <activity
+            android:name=".SummaryActivity"
+            android:exported="false" />
+
         <!-- 音声監視サービス -->
         <service
             android:name=".VoiceListenerService"

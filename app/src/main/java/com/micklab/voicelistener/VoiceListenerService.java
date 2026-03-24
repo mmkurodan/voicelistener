@@ -59,7 +59,6 @@ public class VoiceListenerService extends Service {
     private static final int MIN_SPEECH_FRAMES = 8;
     private static final double RMS_THRESHOLD = 900.0;
     private static final long SUMMARY_DEBOUNCE_MS = 4000L;
-    private static final int MAX_SUMMARY_LOG_LINES = 120;
 
     private static final String LEGACY_VOSK_MODEL_FOLDER = "vosk-model-ja";
     private static final String MODELS_FOLDER = "models";
@@ -106,7 +105,6 @@ public class VoiceListenerService extends Service {
     private PowerManager.WakeLock cpuWakeLock;
     private WifiManager.WifiLock wifiWakeLock;
     private ScheduledFuture<?> pendingSummaryFuture;
-    private String lastSummaryInputHash;
     private int activeAudioSource = MediaRecorder.AudioSource.MIC;
 
     @Override
@@ -697,12 +695,20 @@ public class VoiceListenerService extends Service {
     }
 
     private void scheduleSummaryRefresh() {
+        scheduleSummaryRefresh(SUMMARY_DEBOUNCE_MS);
+    }
+
+    private void triggerImmediateSummaryRefresh() {
+        scheduleSummaryRefresh(0L);
+    }
+
+    private void scheduleSummaryRefresh(long delayMs) {
         ensureSummaryExecutor();
         cancelPendingSummaryTask();
         pendingSummaryFuture = summaryExecutor.schedule(() -> {
             pendingSummaryFuture = null;
             refreshLiveSummary(false);
-        }, SUMMARY_DEBOUNCE_MS, TimeUnit.MILLISECONDS);
+        }, Math.max(0L, delayMs), TimeUnit.MILLISECONDS);
     }
 
     private void cancelPendingSummaryTask() {
@@ -735,25 +741,25 @@ public class VoiceListenerService extends Service {
     }
 
     private void refreshLiveSummary(boolean force) {
-        if (logManager == null) {
-            return;
-        }
-
-        String recognitionTail = logManager.readLatestRecognitionLogTail(MAX_SUMMARY_LOG_LINES).trim();
+        long summaryRevision = LiveSummaryStore.getSummaryRevision(this);
         LiveSummaryState previousState = LiveSummaryStore.loadSummaryState(this);
-        if (recognitionTail.isEmpty()) {
-            LiveSummaryStore.saveSummaryState(this, new LiveSummaryState(
-                previousState.getSummary(),
-                previousState.getDecisions(),
-                previousState.getTodos(),
-                "要約待機中",
-                previousState.getUpdatedAtMillis()
-            ));
+        String pendingLogs = LiveSummaryStore.getPendingSummaryLogs(this);
+        if (LiveSummaryStore.getSummaryRevision(this) != summaryRevision) {
             return;
         }
-
-        String sourceHash = hashText(recognitionTail);
-        if (!force && sourceHash.equals(lastSummaryInputHash)) {
+        if (pendingLogs.isEmpty()) {
+            if (force) {
+                if (LiveSummaryStore.getSummaryRevision(this) != summaryRevision) {
+                    return;
+                }
+                LiveSummaryStore.saveSummaryState(this, new LiveSummaryState(
+                    previousState.getSummary(),
+                    previousState.getDecisions(),
+                    previousState.getTodos(),
+                    "要約待機中",
+                    previousState.getUpdatedAtMillis()
+                ));
+            }
             return;
         }
 
@@ -761,10 +767,17 @@ public class VoiceListenerService extends Service {
             LiveSummaryState response = ollamaClient.generateSummary(
                 LiveSummaryStore.getOllamaBaseUrl(this),
                 LiveSummaryStore.getOllamaModel(this),
-                recognitionTail,
+                pendingLogs,
                 previousState
             );
+            if (LiveSummaryStore.getSummaryRevision(this) != summaryRevision) {
+                return;
+            }
             long updatedAt = System.currentTimeMillis();
+            LiveSummaryStore.removePendingSummaryLogs(this, pendingLogs);
+            if (LiveSummaryStore.getSummaryRevision(this) != summaryRevision) {
+                return;
+            }
             LiveSummaryStore.saveSummaryState(this, new LiveSummaryState(
                 response.getSummary(),
                 response.getDecisions(),
@@ -772,8 +785,10 @@ public class VoiceListenerService extends Service {
                 "要約更新済み",
                 updatedAt
             ));
-            lastSummaryInputHash = sourceHash;
         } catch (IOException e) {
+            if (LiveSummaryStore.getSummaryRevision(this) != summaryRevision) {
+                return;
+            }
             String errorMessage = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             try { if (logManager != null) logManager.writeLog("要約更新失敗: " + errorMessage, false); } catch (Exception ignored) {}
             LiveSummaryStore.saveSummaryState(this, new LiveSummaryState(
@@ -797,20 +812,6 @@ public class VoiceListenerService extends Service {
             return sb.toString();
         } catch (Exception e) {
             return Integer.toHexString(url.hashCode());
-        }
-    }
-
-    private String hashText(String text) {
-        try {
-            MessageDigest digest = MessageDigest.getInstance("SHA-256");
-            byte[] hash = digest.digest(text.getBytes(StandardCharsets.UTF_8));
-            StringBuilder sb = new StringBuilder();
-            for (int i = 0; i < 12 && i < hash.length; i++) {
-                sb.append(String.format("%02x", hash[i]));
-            }
-            return sb.toString();
-        } catch (Exception e) {
-            return Integer.toHexString(text.hashCode());
         }
     }
 
@@ -1069,7 +1070,12 @@ public class VoiceListenerService extends Service {
                     if (logManager != null) {
                         try { logManager.writeLog("認識: " + normalizedText); } catch (Exception ignored) {}
                     }
-                    scheduleSummaryRefresh();
+                    LiveSummaryStore.appendPendingSummaryLog(this, normalizedText);
+                    if (LiveSummaryStore.getPendingSummaryLogCharCount(this) >= LiveSummaryStore.getSummaryForceCharThreshold(this)) {
+                        triggerImmediateSummaryRefresh();
+                    } else {
+                        scheduleSummaryRefresh();
+                    }
                 }
             } catch (Exception e) {
                 Log.e(TAG, "Transcription task failed", e);

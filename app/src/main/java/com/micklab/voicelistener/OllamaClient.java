@@ -148,19 +148,20 @@ public class OllamaClient {
 
         LiveSummaryState safePrevious = previousState == null ? LiveSummaryState.empty() : previousState;
         return "あなたは会議メモ整理アシスタントです。\n"
-            + "以下の認識ログから、現在の要約・決定事項・未完了ToDoを更新してください。\n"
+            + "以下の新規認識ログ差分と前回状態を使って、会議全体の要約・決定事項・未完了ToDoを再生成してください。\n"
             + "必ずJSONオブジェクトのみを返してください。説明文は不要です。\n"
             + "形式:\n"
             + "{\"summary\":\"80文字以内\",\"decisions\":[\"...\"],\"todos\":[\"...\"]}\n"
             + "ルール:\n"
             + "- 事実のみを書く。\n"
+            + "- summaryは前回内容を踏まえた最新の全体要約にする。\n"
             + "- decisionsは決定済み・合意済みのみ。\n"
             + "- todosは未完了の作業のみ。完了済みは除外する。\n"
             + "- 重複は統合する。\n"
             + "- 情報が不足する項目は空文字または空配列にする。\n"
             + "前回状態:\n"
             + safePrevious.toJsonString()
-            + "\n認識ログ:\n"
+            + "\n新規認識ログ差分:\n"
             + clippedLogs;
     }
 

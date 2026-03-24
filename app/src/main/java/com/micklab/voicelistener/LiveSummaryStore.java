@@ -15,6 +15,10 @@ public final class LiveSummaryStore {
     private static final String PREF_OLLAMA_MODEL = "ollama_model";
     private static final String PREF_OLLAMA_MODELS_JSON = "ollama_models_json";
     private static final String PREF_LIVE_SUMMARY_JSON = "live_summary_json";
+    private static final String PREF_PENDING_SUMMARY_LOGS = "pending_summary_logs";
+    private static final String PREF_SUMMARY_FORCE_CHAR_THRESHOLD = "summary_force_char_threshold";
+    private static final String PREF_SUMMARY_REVISION = "summary_revision";
+    private static final int DEFAULT_SUMMARY_FORCE_CHAR_THRESHOLD = 1200;
 
     private LiveSummaryStore() {
     }
@@ -96,6 +100,70 @@ public final class LiveSummaryStore {
             .apply();
     }
 
+    public static synchronized String getPendingSummaryLogs(Context context) {
+        return PendingSummaryBuffer.normalizeBlock(
+            getPrefs(context).getString(PREF_PENDING_SUMMARY_LOGS, null)
+        );
+    }
+
+    public static synchronized void appendPendingSummaryLog(Context context, String recognizedText) {
+        SharedPreferences prefs = getPrefs(context);
+        String updated = PendingSummaryBuffer.appendEntry(
+            prefs.getString(PREF_PENDING_SUMMARY_LOGS, null),
+            recognizedText
+        );
+        prefs.edit()
+            .putString(PREF_PENDING_SUMMARY_LOGS, updated)
+            .apply();
+    }
+
+    public static synchronized void removePendingSummaryLogs(Context context, String consumedLogs) {
+        SharedPreferences prefs = getPrefs(context);
+        String remaining = PendingSummaryBuffer.removeConsumedPrefix(
+            prefs.getString(PREF_PENDING_SUMMARY_LOGS, null),
+            consumedLogs
+        );
+        prefs.edit()
+            .putString(PREF_PENDING_SUMMARY_LOGS, remaining)
+            .apply();
+    }
+
+    public static synchronized void clearPendingSummaryLogs(Context context) {
+        getPrefs(context).edit()
+            .putString(PREF_PENDING_SUMMARY_LOGS, "")
+            .apply();
+    }
+
+    public static int getPendingSummaryLogCharCount(Context context) {
+        return PendingSummaryBuffer.length(getPendingSummaryLogs(context));
+    }
+
+    public static int getSummaryForceCharThreshold(Context context) {
+        return normalizeSummaryForceCharThreshold(
+            getPrefs(context).getInt(PREF_SUMMARY_FORCE_CHAR_THRESHOLD, DEFAULT_SUMMARY_FORCE_CHAR_THRESHOLD)
+        );
+    }
+
+    public static void setSummaryForceCharThreshold(Context context, int charCount) {
+        getPrefs(context).edit()
+            .putInt(PREF_SUMMARY_FORCE_CHAR_THRESHOLD, normalizeSummaryForceCharThreshold(charCount))
+            .apply();
+    }
+
+    public static synchronized long getSummaryRevision(Context context) {
+        return Math.max(0L, getPrefs(context).getLong(PREF_SUMMARY_REVISION, 0L));
+    }
+
+    public static synchronized void clearSummarySession(Context context) {
+        SharedPreferences prefs = getPrefs(context);
+        long nextRevision = Math.max(0L, prefs.getLong(PREF_SUMMARY_REVISION, 0L)) + 1L;
+        prefs.edit()
+            .putLong(PREF_SUMMARY_REVISION, nextRevision)
+            .putString(PREF_LIVE_SUMMARY_JSON, LiveSummaryState.empty().toJsonString())
+            .putString(PREF_PENDING_SUMMARY_LOGS, "")
+            .apply();
+    }
+
     private static SharedPreferences getPrefs(Context context) {
         return context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE);
     }
@@ -125,5 +193,9 @@ public final class LiveSummaryStore {
     private static String normalizeModel(String model) {
         String trimmed = model == null ? "" : model.trim();
         return trimmed.isEmpty() ? "default" : trimmed;
+    }
+
+    private static int normalizeSummaryForceCharThreshold(int charCount) {
+        return charCount <= 0 ? DEFAULT_SUMMARY_FORCE_CHAR_THRESHOLD : charCount;
     }
 }

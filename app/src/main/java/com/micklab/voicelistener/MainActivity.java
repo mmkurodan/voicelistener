@@ -8,6 +8,9 @@ import android.net.Uri;
 import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
+import android.text.method.ScrollingMovementMethod;
+import android.view.MotionEvent;
+import android.view.View;
 import android.widget.AdapterView;
 import android.widget.Button;
 import android.widget.EditText;
@@ -50,7 +53,6 @@ public class MainActivity extends Activity {
     private Button stopButton;
     private TextView statusText;
     private EditText logContentText;
-    private ScrollView logScrollView;
 
     private Handler uiHandler;
     private Runnable periodicUpdateRunnable;
@@ -288,7 +290,7 @@ public class MainActivity extends Activity {
         layout.addView(ollamaSectionLabel);
 
         ollamaBaseUrlInput = new EditText(this);
-        ollamaBaseUrlInput.setHint("http://10.0.2.2:11434");
+        ollamaBaseUrlInput.setHint(OllamaClient.DEFAULT_BASE_URL);
         ollamaBaseUrlInput.setText(LiveSummaryStore.getOllamaBaseUrl(this));
         layout.addView(ollamaBaseUrlInput);
 
@@ -383,19 +385,8 @@ public class MainActivity extends Activity {
         logContentText.setBackgroundColor(0xFF000000);
         logContentText.setTextColor(0xFF00FF00);
         logContentText.setPadding(10, 10, 10, 10);
-        // 非編集モードで選択とコピーを許可
-        logContentText.setKeyListener(null);
-        logContentText.setFocusable(false);
-        logContentText.setCursorVisible(false);
-        logContentText.setLongClickable(true);
-        logContentText.setTextIsSelectable(true);
-        logContentText.setHorizontallyScrolling(false);
-        
-        logScrollView = new ScrollView(this);
-        logScrollView.addView(logContentText);
-        logScrollView.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, 500));
-        layout.addView(logScrollView);
+        configureReadOnlyLogTextArea(logContentText, 500);
+        layout.addView(logContentText);
 
         refreshModelSpinner(false);
         refreshOllamaModelSpinner(false);
@@ -424,6 +415,65 @@ public class MainActivity extends Activity {
         output.setTextIsSelectable(true);
         output.setHorizontallyScrolling(false);
         return output;
+    }
+
+    private void configureReadOnlyLogTextArea(EditText textArea, int heightPx) {
+        textArea.setKeyListener(null);
+        textArea.setCursorVisible(false);
+        textArea.setLongClickable(true);
+        textArea.setTextIsSelectable(true);
+        textArea.setFocusable(true);
+        textArea.setFocusableInTouchMode(true);
+        textArea.setShowSoftInputOnFocus(false);
+        textArea.setHorizontallyScrolling(false);
+        textArea.setVerticalScrollBarEnabled(true);
+        textArea.setMovementMethod(ScrollingMovementMethod.getInstance());
+        textArea.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        textArea.setLayoutParams(new LinearLayout.LayoutParams(
+            LinearLayout.LayoutParams.MATCH_PARENT, heightPx));
+        textArea.setOnTouchListener((v, event) -> {
+            if (v.getParent() == null) {
+                return false;
+            }
+            switch (event.getActionMasked()) {
+                case MotionEvent.ACTION_DOWN:
+                case MotionEvent.ACTION_MOVE:
+                    v.getParent().requestDisallowInterceptTouchEvent(true);
+                    break;
+                case MotionEvent.ACTION_UP:
+                case MotionEvent.ACTION_CANCEL:
+                    v.getParent().requestDisallowInterceptTouchEvent(false);
+                    break;
+                default:
+                    break;
+            }
+            return false;
+        });
+    }
+
+    private void setLogContentTextKeepingViewport(String text) {
+        if (logContentText == null) return;
+        String nextText = text == null ? "" : text;
+        CharSequence currentText = logContentText.getText();
+        if (currentText != null && nextText.contentEquals(currentText)) {
+            return;
+        }
+
+        int scrollX = logContentText.getScrollX();
+        int scrollY = logContentText.getScrollY();
+        logContentText.setTextKeepState(nextText);
+        logContentText.post(() -> {
+            if (logContentText == null || logContentText.getLayout() == null) {
+                return;
+            }
+            int maxScrollY = Math.max(
+                0,
+                logContentText.getLayout().getHeight()
+                    - logContentText.getHeight()
+                    + logContentText.getCompoundPaddingTop()
+                    + logContentText.getCompoundPaddingBottom());
+            logContentText.scrollTo(scrollX, Math.min(scrollY, maxScrollY));
+        });
     }
     
     private void checkPermissions() {
@@ -760,7 +810,7 @@ public class MainActivity extends Activity {
         try {
             File[] logFiles = logManager.getLogFiles();
             if (logFiles == null || logFiles.length == 0) {
-                logContentText.setText("ログファイルがありません");
+                setLogContentTextKeepingViewport("ログファイルがありません");
                 return;
             }
 
@@ -817,14 +867,11 @@ public class MainActivity extends Activity {
                     logContent.append(msg).append('\n');
                 }
 
-                logContentText.setText(logContent.toString());
-
-                // 最新を先頭に表示するため先頭へスクロール
-                logScrollView.post(() -> logScrollView.fullScroll(ScrollView.FOCUS_UP));
+                setLogContentTextKeepingViewport(logContent.toString());
             }
 
         } catch (IOException e) {
-            logContentText.setText("ログ読み込みエラー: " + e.getMessage());
+            setLogContentTextKeepingViewport("ログ読み込みエラー: " + e.getMessage());
         }
     }
 

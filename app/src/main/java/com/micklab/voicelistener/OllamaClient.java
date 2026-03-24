@@ -19,7 +19,8 @@ import org.json.JSONException;
 import org.json.JSONObject;
 
 public class OllamaClient {
-    public static final String DEFAULT_BASE_URL = "http://10.0.2.2:11434";
+    public static final String DEFAULT_BASE_URL = "http://127.0.0.1:11434";
+    static final String LEGACY_DEFAULT_BASE_URL = "http://10.0.2.2:11434";
     private static final String TAG = "OllamaClient";
     private static final int CONNECT_TIMEOUT_MS = 10000;
     private static final int READ_TIMEOUT_MS = 120000;

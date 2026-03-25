@@ -771,14 +771,17 @@ public class VoiceListenerService extends Service {
             if (LiveSummaryStore.getSummaryRevision(this) != summaryRevision) {
                 return;
             }
-            LiveSummaryStore.saveOllamaDebugState(this, new OllamaDebugState(
-                baseUrl,
-                model,
-                prompt,
-                "",
-                "Ollama応答待ち",
-                requestStartedAt
-            ));
+            LiveSummaryStore.saveOllamaDebugState(
+                this,
+                LiveSummaryStore.loadOllamaDebugState(this).appendHistoryEntry(
+                    baseUrl,
+                    model,
+                    "プロンプト",
+                    prompt,
+                    "Ollama応答待ち",
+                    requestStartedAt
+                )
+            );
             OllamaClient.SummaryGenerationResult result = ollamaClient.generateSummaryFromPrompt(
                 baseUrl,
                 model,
@@ -792,14 +795,17 @@ public class VoiceListenerService extends Service {
             if (LiveSummaryStore.getSummaryRevision(this) != summaryRevision) {
                 return;
             }
-            LiveSummaryStore.saveOllamaDebugState(this, new OllamaDebugState(
-                baseUrl,
-                model,
-                result.getPrompt(),
-                result.getRawResponse(),
-                "Ollama応答受信",
-                updatedAt
-            ));
+            LiveSummaryStore.saveOllamaDebugState(
+                this,
+                LiveSummaryStore.loadOllamaDebugState(this).appendHistoryEntry(
+                    baseUrl,
+                    model,
+                    "レスポンス",
+                    result.getRawResponse(),
+                    "Ollama応答受信",
+                    updatedAt
+                )
+            );
             LiveSummaryStore.saveSummaryState(this, new LiveSummaryState(
                 result.getState().getSummary(),
                 result.getState().getDecisions(),
@@ -813,14 +819,17 @@ public class VoiceListenerService extends Service {
             }
             long failedAt = System.currentTimeMillis();
             String errorMessage = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            LiveSummaryStore.saveOllamaDebugState(this, new OllamaDebugState(
-                LiveSummaryStore.getOllamaBaseUrl(this),
-                LiveSummaryStore.getOllamaModel(this),
-                e.getPrompt(),
-                e.getRawResponse(),
-                "Ollama応答失敗: " + errorMessage,
-                failedAt
-            ));
+            LiveSummaryStore.saveOllamaDebugState(
+                this,
+                LiveSummaryStore.loadOllamaDebugState(this).appendHistoryEntry(
+                    LiveSummaryStore.getOllamaBaseUrl(this),
+                    LiveSummaryStore.getOllamaModel(this),
+                    e.getRawResponse().trim().isEmpty() ? "エラー" : "レスポンス",
+                    e.getRawResponse().trim().isEmpty() ? errorMessage : e.getRawResponse(),
+                    "Ollama応答失敗: " + errorMessage,
+                    failedAt
+                )
+            );
             try { if (logManager != null) logManager.writeLog("要約更新失敗: " + errorMessage, false); } catch (Exception ignored) {}
             LiveSummaryStore.saveSummaryState(this, new LiveSummaryState(
                 previousState.getSummary(),
@@ -835,14 +844,17 @@ public class VoiceListenerService extends Service {
             }
             String errorMessage = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
             OllamaDebugState debugState = LiveSummaryStore.loadOllamaDebugState(this);
-            LiveSummaryStore.saveOllamaDebugState(this, new OllamaDebugState(
-                debugState.getBaseUrl(),
-                debugState.getModel(),
-                debugState.getPrompt(),
-                debugState.getResponse(),
-                "Ollama応答失敗: " + errorMessage,
-                System.currentTimeMillis()
-            ));
+            LiveSummaryStore.saveOllamaDebugState(
+                this,
+                debugState.appendHistoryEntry(
+                    debugState.getBaseUrl(),
+                    debugState.getModel(),
+                    "エラー",
+                    errorMessage,
+                    "Ollama応答失敗: " + errorMessage,
+                    System.currentTimeMillis()
+                )
+            );
             try { if (logManager != null) logManager.writeLog("要約更新失敗: " + errorMessage, false); } catch (Exception ignored) {}
             LiveSummaryStore.saveSummaryState(this, new LiveSummaryState(
                 previousState.getSummary(),
@@ -1123,11 +1135,14 @@ public class VoiceListenerService extends Service {
                     if (logManager != null) {
                         try { logManager.writeLog("認識: " + normalizedText); } catch (Exception ignored) {}
                     }
-                    LiveSummaryStore.appendPendingSummaryLog(this, normalizedText);
-                    if (LiveSummaryStore.getPendingSummaryLogCharCount(this) >= LiveSummaryStore.getSummaryForceCharThreshold(this)) {
-                        triggerImmediateSummaryRefresh();
-                    } else {
-                        scheduleSummaryRefresh();
+                    String summaryInputText = PendingSummaryBuffer.normalizeSummaryEntry(normalizedText);
+                    if (!summaryInputText.isEmpty()) {
+                        LiveSummaryStore.appendPendingSummaryLog(this, summaryInputText);
+                        if (LiveSummaryStore.getPendingSummaryLogCharCount(this) >= LiveSummaryStore.getSummaryForceCharThreshold(this)) {
+                            triggerImmediateSummaryRefresh();
+                        } else {
+                            scheduleSummaryRefresh();
+                        }
                     }
                 }
             } catch (Exception e) {

@@ -25,8 +25,6 @@ public class SummaryActivity extends Activity {
     private Runnable periodicUpdateRunnable;
     private TextView summaryStatusText;
     private EditText summaryText;
-    private EditText decisionsText;
-    private EditText todosText;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -68,14 +66,6 @@ public class SummaryActivity extends Activity {
         root.addView(createSectionLabel("要約"));
         summaryText = createReadOnlyTextArea();
         root.addView(summaryText);
-
-        root.addView(createSectionLabel("決定事項"));
-        decisionsText = createReadOnlyTextArea();
-        root.addView(decisionsText);
-
-        root.addView(createSectionLabel("ToDo"));
-        todosText = createReadOnlyTextArea();
-        root.addView(todosText);
 
         setContentView(root);
         updateSummaryDisplay();
@@ -125,13 +115,11 @@ public class SummaryActivity extends Activity {
     }
 
     private void updateSummaryDisplay() {
-        if (summaryStatusText == null || summaryText == null || decisionsText == null || todosText == null) {
+        if (summaryStatusText == null || summaryText == null) {
             return;
         }
         LiveSummaryState state = LiveSummaryStore.loadSummaryState(this);
         summaryText.setText(SummaryTextFormatter.formatSummary(state.getSummary()));
-        decisionsText.setText(SummaryTextFormatter.formatList(state.getDecisions(), "決定事項はまだありません"));
-        todosText.setText(SummaryTextFormatter.formatList(state.getTodos(), "ToDoはまだありません"));
 
         String status = state.getStatus().isEmpty() ? "要約待機中" : state.getStatus();
         int pendingChars = LiveSummaryStore.getPendingSummaryLogCharCount(this);

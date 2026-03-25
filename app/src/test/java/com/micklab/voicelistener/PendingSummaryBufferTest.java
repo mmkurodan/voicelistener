@@ -31,4 +31,18 @@ public class PendingSummaryBufferTest {
 
         assertEquals("A\nB\nC", remaining);
     }
+
+    @Test
+    public void appendEntry_skipsMeaninglessSoundsOnly() {
+        String appended = PendingSummaryBuffer.appendEntry("最初の発話", " あー ");
+
+        assertEquals("最初の発話", appended);
+    }
+
+    @Test
+    public void normalizeSummaryEntry_removesMeaninglessTokensSeparatedBySpaces() {
+        String normalized = PendingSummaryBuffer.normalizeSummaryEntry("あー 今日は えー 進めます");
+
+        assertEquals("今日は 進めます", normalized);
+    }
 }

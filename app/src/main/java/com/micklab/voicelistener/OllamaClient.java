@@ -165,8 +165,8 @@ public class OllamaClient {
                 rawResponse,
                 new LiveSummaryState(
                     parsed.optString("summary", ""),
-                    toStringList(parsed.optJSONArray("decisions")),
-                    toStringList(parsed.optJSONArray("todos")),
+                    new ArrayList<>(),
+                    new ArrayList<>(),
                     "",
                     0L
                 )
@@ -219,29 +219,22 @@ public class OllamaClient {
         }
 
         LiveSummaryState safePrevious = previousState == null ? LiveSummaryState.empty() : previousState;
-        return "あなたは会議メモ整理アシスタントです。\n"
-            + "以下の既存状態と新規認識ログ差分を使って、会議全体の要約・決定事項・未完了ToDoを再生成してください。\n"
+        return "あなたは会議要約更新アシスタントです。\n"
+            + "以下の前回要約と新規認識ログ差分を使って、会議全体の要約を更新してください。\n"
+            + "決定事項やToDoは配列で個別に返さず、重要であればsummary本文の中で自然に触れてください。\n"
             + "必ずJSONオブジェクトのみを返してください。説明文は不要です。\n"
             + "形式:\n"
-            + "{\"summary\":\"80文字以内\",\"decisions\":[\"...\"],\"todos\":[\"...\"]}\n"
+            + "{\"summary\":\"160文字以内\"}\n"
             + "ルール:\n"
             + "- 事実のみを書く。\n"
-            + "- summaryは前回内容を踏まえた最新の全体要約にする。\n"
-            + "- decisionsは決定済み・合意済みのみ。\n"
-            + "- todosは未完了の作業のみ。完了済みは除外する。\n"
-            + "- 既存の要約・決定事項・ToDoは会議の継続文脈として扱い、新規ログと矛盾しない限り優先して残す。\n"
-            + "- 既存項目を削除・変更するのは、新規ログにより明確な矛盾・撤回・完了が確認できる場合のみにする。\n"
-            + "- 重複は統合する。\n"
-            + "- 情報が不足する項目は空文字または空配列にする。\n"
-            + "既存の要約:\n"
+            + "- summaryは前回要約を引き継ぎつつ、新規ログ差分を反映した最新の全体要約にする。\n"
+            + "- 決定事項・未完了ToDo・懸念点などの重要事項はsummary本文の中で簡潔に触れる。\n"
+            + "- 前回要約を削除・修正するのは、新規ログにより明確な矛盾・撤回・完了が確認できる場合のみにする。\n"
+            + "- 新規ログに根拠がない内容は追加しない。\n"
+            + "- 固有名詞や数値は認識ログに現れた内容を優先する。\n"
+            + "- 情報が不足する場合は空文字にする。\n"
+            + "前回の要約:\n"
             + formatPromptText(safePrevious.getSummary())
-            + "\n既存の決定事項:\n"
-            + formatPromptList(safePrevious.getDecisions())
-            + "\n既存のToDo:\n"
-            + formatPromptList(safePrevious.getTodos())
-            + "\n"
-            + "前回状態:\n"
-            + safePrevious.toJsonString()
             + "\n新規認識ログ差分:\n"
             + clippedLogs;
     }
@@ -333,19 +326,5 @@ public class OllamaClient {
     private String formatPromptText(String value) {
         String normalized = value == null ? "" : value.trim();
         return normalized.isEmpty() ? "（なし）" : normalized;
-    }
-
-    private String formatPromptList(List<String> values) {
-        if (values == null || values.isEmpty()) {
-            return "（なし）";
-        }
-        StringBuilder builder = new StringBuilder();
-        for (String value : values) {
-            if (builder.length() > 0) {
-                builder.append('\n');
-            }
-            builder.append("・").append(value);
-        }
-        return builder.toString();
     }
 }

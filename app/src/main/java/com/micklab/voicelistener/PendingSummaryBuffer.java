@@ -6,7 +6,7 @@ public final class PendingSummaryBuffer {
 
     public static String appendEntry(String current, String entry) {
         String normalizedCurrent = normalizeBlock(current);
-        String normalizedEntry = normalizeEntry(entry);
+        String normalizedEntry = normalizeSummaryEntry(entry);
         if (normalizedEntry.isEmpty()) {
             return normalizedCurrent;
         }
@@ -43,20 +43,61 @@ public final class PendingSummaryBuffer {
         if (value == null) {
             return "";
         }
-        return value
+        String normalized = value
             .replace("\r\n", "\n")
-            .replace('\r', '\n')
-            .trim();
+            .replace('\r', '\n');
+        StringBuilder builder = new StringBuilder();
+        for (String line : normalized.split("\n")) {
+            String normalizedLine = normalizeSummaryEntry(line);
+            if (normalizedLine.isEmpty()) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append('\n');
+            }
+            builder.append(normalizedLine);
+        }
+        return builder.toString();
     }
 
-    private static String normalizeEntry(String entry) {
+    public static String normalizeSummaryEntry(String entry) {
         if (entry == null) {
             return "";
         }
-        return entry
+        String normalized = entry
             .replace("\r\n", "\n")
             .replace('\r', '\n')
             .replace('\n', ' ')
+            .replaceAll("\\s+", " ")
             .trim();
+        if (normalized.isEmpty()) {
+            return "";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (String token : normalized.split(" ")) {
+            String normalizedToken = token.trim();
+            if (normalizedToken.isEmpty() || isMeaninglessSoundToken(normalizedToken)) {
+                continue;
+            }
+            if (builder.length() > 0) {
+                builder.append(' ');
+            }
+            builder.append(normalizedToken);
+        }
+        return builder.toString().trim();
+    }
+
+    private static boolean isMeaninglessSoundToken(String token) {
+        String normalized = token == null ? "" : token
+            .replace("〜", "")
+            .replace("ー", "")
+            .replace("…", "")
+            .replace("・", "")
+            .replaceAll("[、。,.!！?？]", "")
+            .trim();
+        if (normalized.isEmpty()) {
+            return true;
+        }
+        return normalized.matches("(ん+|あ+|え+|う+ん*|えっと|えと|えーと|あの+)");
     }
 }

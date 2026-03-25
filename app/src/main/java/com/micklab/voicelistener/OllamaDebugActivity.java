@@ -24,8 +24,7 @@ public class OllamaDebugActivity extends Activity {
     private Handler uiHandler;
     private Runnable periodicUpdateRunnable;
     private TextView statusText;
-    private EditText promptText;
-    private EditText responseText;
+    private EditText historyText;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -56,13 +55,9 @@ public class OllamaDebugActivity extends Activity {
         copyAllButton.setOnClickListener(v -> copyAllText());
         actionRow.addView(copyAllButton);
 
-        root.addView(createSectionLabel("プロンプト"));
-        promptText = createReadOnlyTextArea();
-        root.addView(promptText);
-
-        root.addView(createSectionLabel("レスポンス"));
-        responseText = createReadOnlyTextArea();
-        root.addView(responseText);
+        root.addView(createSectionLabel("履歴"));
+        historyText = createReadOnlyTextArea();
+        root.addView(historyText);
 
         setContentView(root);
         updateDisplay();
@@ -112,12 +107,11 @@ public class OllamaDebugActivity extends Activity {
     }
 
     private void updateDisplay() {
-        if (statusText == null || promptText == null || responseText == null) {
+        if (statusText == null || historyText == null) {
             return;
         }
         OllamaDebugState state = LiveSummaryStore.loadOllamaDebugState(this);
-        promptText.setText(formatText(state.getPrompt(), "まだプロンプトはありません"));
-        responseText.setText(formatText(state.getResponse(), "まだレスポンスはありません"));
+        historyText.setText(formatText(state.getHistory(), "まだ履歴はありません"));
 
         String status = state.getStatus().isEmpty() ? "Ollama待機中" : state.getStatus();
         if (!state.getModel().isEmpty()) {
@@ -144,12 +138,10 @@ public class OllamaDebugActivity extends Activity {
             return;
         }
         OllamaDebugState state = LiveSummaryStore.loadOllamaDebugState(this);
-        StringBuilder builder = new StringBuilder();
-        builder.append("プロンプト\n")
-            .append(formatText(state.getPrompt(), "まだプロンプトはありません"))
-            .append("\n\nレスポンス\n")
-            .append(formatText(state.getResponse(), "まだレスポンスはありません"));
-        clipboardManager.setPrimaryClip(ClipData.newPlainText("ollama-debug", builder.toString()));
+        clipboardManager.setPrimaryClip(ClipData.newPlainText(
+            "ollama-debug",
+            formatText(state.getHistory(), "まだ履歴はありません")
+        ));
         Toast.makeText(this, "Ollama入出力をコピーしました", Toast.LENGTH_SHORT).show();
     }
 

@@ -1,0 +1,114 @@
+-- Merging decision tree log ---
+manifest
+ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:1:1-59:12
+INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml:1:1-59:12
+INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml:1:1-59:12
+INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml:1:1-59:12
+MERGED from [com.alphacephei:vosk-android:0.3.47] /root/.gradle/caches/8.12/transforms/bda715fc587fc97d3f8c75dc1b90fdde/transformed/jetified-vosk-android-0.3.47/AndroidManifest.xml:2:1-7:12
+MERGED from [net.java.dev.jna:jna:5.13.0] /root/.gradle/caches/8.12/transforms/1d30e27336856678c5310dcd3c99e0d6/transformed/jetified-jna-5.13.0/AndroidManifest.xml:2:1-8:12
+	package
+		INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml
+	android:versionName
+		INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml
+	android:versionCode
+		INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml
+	xmlns:android
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:1:11-69
+uses-permission#android.permission.RECORD_AUDIO
+ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:4:5-71
+	android:name
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:4:22-68
+uses-permission#android.permission.WAKE_LOCK
+ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:5:5-68
+	android:name
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:5:22-65
+uses-permission#android.permission.FOREGROUND_SERVICE
+ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:9:5-77
+	android:name
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:9:22-74
+uses-permission#android.permission.FOREGROUND_SERVICE_MICROPHONE
+ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:10:5-88
+	android:name
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:10:22-85
+uses-permission#android.permission.RECEIVE_BOOT_COMPLETED
+ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:13:5-81
+	android:name
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:13:22-78
+uses-permission#android.permission.INTERNET
+ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:16:5-67
+	android:name
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:16:22-64
+uses-permission#android.permission.POST_NOTIFICATIONS
+ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:18:5-77
+	android:name
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:18:22-74
+application
+ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:20:5-57:19
+INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml:20:5-57:19
+	android:extractNativeLibs
+		INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml
+	android:label
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:21:9-38
+	android:theme
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:22:9-60
+	android:usesCleartextTraffic
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:23:9-44
+activity#com.micklab.voicelistener.MainActivity
+ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:25:9-34:20
+	android:exported
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:27:13-36
+	android:name
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:26:13-41
+intent-filter#action:name:android.intent.action.MAIN+category:name:android.intent.category.LAUNCHER
+ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:29:13-32:29
+action#android.intent.action.MAIN
+ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:30:17-69
+	android:name
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:30:25-66
+category#android.intent.category.LAUNCHER
+ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:31:17-77
+	android:name
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:31:27-74
+activity#com.micklab.voicelistener.SummaryActivity
+ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:36:9-38:40
+	android:exported
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:38:13-37
+	android:name
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:37:13-44
+service#com.micklab.voicelistener.VoiceListenerService
+ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:41:9-45:58
+	android:enabled
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:43:13-35
+	android:exported
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:44:13-37
+	android:foregroundServiceType
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:45:13-55
+	android:name
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:42:13-49
+receiver#com.micklab.voicelistener.BootReceiver
+ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:48:9-55:20
+	android:enabled
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:50:13-35
+	android:exported
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:51:13-36
+	android:name
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:49:13-41
+intent-filter#action:name:android.intent.action.BOOT_COMPLETED
+ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:52:13-54:29
+action#android.intent.action.BOOT_COMPLETED
+ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:53:17-79
+	android:name
+		ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:53:25-76
+uses-sdk
+INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml reason: use-sdk injection requested
+INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml
+INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml
+MERGED from [com.alphacephei:vosk-android:0.3.47] /root/.gradle/caches/8.12/transforms/bda715fc587fc97d3f8c75dc1b90fdde/transformed/jetified-vosk-android-0.3.47/AndroidManifest.xml:5:5-44
+MERGED from [com.alphacephei:vosk-android:0.3.47] /root/.gradle/caches/8.12/transforms/bda715fc587fc97d3f8c75dc1b90fdde/transformed/jetified-vosk-android-0.3.47/AndroidManifest.xml:5:5-44
+MERGED from [net.java.dev.jna:jna:5.13.0] /root/.gradle/caches/8.12/transforms/1d30e27336856678c5310dcd3c99e0d6/transformed/jetified-jna-5.13.0/AndroidManifest.xml:7:5-47
+MERGED from [net.java.dev.jna:jna:5.13.0] /root/.gradle/caches/8.12/transforms/1d30e27336856678c5310dcd3c99e0d6/transformed/jetified-jna-5.13.0/AndroidManifest.xml:7:5-47
+	android:targetSdkVersion
+		INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml
+	android:minSdkVersion
+		INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml
+		MERGED from /root/voicelistener/app/src/main/AndroidManifest.xml

@@ -764,11 +764,25 @@ public class VoiceListenerService extends Service {
         }
 
         try {
-            LiveSummaryState response = ollamaClient.generateSummary(
-                LiveSummaryStore.getOllamaBaseUrl(this),
-                LiveSummaryStore.getOllamaModel(this),
-                pendingLogs,
-                previousState
+            String baseUrl = LiveSummaryStore.getOllamaBaseUrl(this);
+            String model = LiveSummaryStore.getOllamaModel(this);
+            String prompt = ollamaClient.buildSummaryPrompt(pendingLogs, previousState);
+            long requestStartedAt = System.currentTimeMillis();
+            if (LiveSummaryStore.getSummaryRevision(this) != summaryRevision) {
+                return;
+            }
+            LiveSummaryStore.saveOllamaDebugState(this, new OllamaDebugState(
+                baseUrl,
+                model,
+                prompt,
+                "",
+                "Ollama応答待ち",
+                requestStartedAt
+            ));
+            OllamaClient.SummaryGenerationResult result = ollamaClient.generateSummaryFromPrompt(
+                baseUrl,
+                model,
+                prompt
             );
             if (LiveSummaryStore.getSummaryRevision(this) != summaryRevision) {
                 return;
@@ -778,18 +792,57 @@ public class VoiceListenerService extends Service {
             if (LiveSummaryStore.getSummaryRevision(this) != summaryRevision) {
                 return;
             }
+            LiveSummaryStore.saveOllamaDebugState(this, new OllamaDebugState(
+                baseUrl,
+                model,
+                result.getPrompt(),
+                result.getRawResponse(),
+                "Ollama応答受信",
+                updatedAt
+            ));
             LiveSummaryStore.saveSummaryState(this, new LiveSummaryState(
-                response.getSummary(),
-                response.getDecisions(),
-                response.getTodos(),
+                result.getState().getSummary(),
+                result.getState().getDecisions(),
+                result.getState().getTodos(),
                 "要約更新済み",
                 updatedAt
+            ));
+        } catch (OllamaClient.SummaryGenerationException e) {
+            if (LiveSummaryStore.getSummaryRevision(this) != summaryRevision) {
+                return;
+            }
+            long failedAt = System.currentTimeMillis();
+            String errorMessage = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            LiveSummaryStore.saveOllamaDebugState(this, new OllamaDebugState(
+                LiveSummaryStore.getOllamaBaseUrl(this),
+                LiveSummaryStore.getOllamaModel(this),
+                e.getPrompt(),
+                e.getRawResponse(),
+                "Ollama応答失敗: " + errorMessage,
+                failedAt
+            ));
+            try { if (logManager != null) logManager.writeLog("要約更新失敗: " + errorMessage, false); } catch (Exception ignored) {}
+            LiveSummaryStore.saveSummaryState(this, new LiveSummaryState(
+                previousState.getSummary(),
+                previousState.getDecisions(),
+                previousState.getTodos(),
+                "要約更新失敗: " + errorMessage,
+                previousState.getUpdatedAtMillis()
             ));
         } catch (IOException e) {
             if (LiveSummaryStore.getSummaryRevision(this) != summaryRevision) {
                 return;
             }
             String errorMessage = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            OllamaDebugState debugState = LiveSummaryStore.loadOllamaDebugState(this);
+            LiveSummaryStore.saveOllamaDebugState(this, new OllamaDebugState(
+                debugState.getBaseUrl(),
+                debugState.getModel(),
+                debugState.getPrompt(),
+                debugState.getResponse(),
+                "Ollama応答失敗: " + errorMessage,
+                System.currentTimeMillis()
+            ));
             try { if (logManager != null) logManager.writeLog("要約更新失敗: " + errorMessage, false); } catch (Exception ignored) {}
             LiveSummaryStore.saveSummaryState(this, new LiveSummaryState(
                 previousState.getSummary(),

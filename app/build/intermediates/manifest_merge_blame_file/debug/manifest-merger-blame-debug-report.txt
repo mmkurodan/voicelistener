@@ -39,7 +39,7 @@
 25-->/root/voicelistener/app/src/main/AndroidManifest.xml:18:22-74
 26
 27    <application
-27-->/root/voicelistener/app/src/main/AndroidManifest.xml:20:5-57:19
+27-->/root/voicelistener/app/src/main/AndroidManifest.xml:20:5-61:19
 28        android:debuggable="true"
 29        android:extractNativeLibs="false"
 30        android:label="voicelistener"
@@ -71,35 +71,41 @@
 43-->/root/voicelistener/app/src/main/AndroidManifest.xml:37:13-44
 44            android:exported="false" />
 44-->/root/voicelistener/app/src/main/AndroidManifest.xml:38:13-37
-45
-46        <!-- 音声監視サービス -->
-47        <service
-47-->/root/voicelistener/app/src/main/AndroidManifest.xml:41:9-45:58
-48            android:name="com.micklab.voicelistener.VoiceListenerService"
-48-->/root/voicelistener/app/src/main/AndroidManifest.xml:42:13-49
-49            android:enabled="true"
-49-->/root/voicelistener/app/src/main/AndroidManifest.xml:43:13-35
-50            android:exported="false"
-50-->/root/voicelistener/app/src/main/AndroidManifest.xml:44:13-37
-51            android:foregroundServiceType="microphone" />
-51-->/root/voicelistener/app/src/main/AndroidManifest.xml:45:13-55
-52
-53        <!-- システム起動時の自動開始レシーバー -->
-54        <receiver
-54-->/root/voicelistener/app/src/main/AndroidManifest.xml:48:9-55:20
-55            android:name="com.micklab.voicelistener.BootReceiver"
-55-->/root/voicelistener/app/src/main/AndroidManifest.xml:49:13-41
-56            android:enabled="true"
-56-->/root/voicelistener/app/src/main/AndroidManifest.xml:50:13-35
-57            android:exported="true" >
-57-->/root/voicelistener/app/src/main/AndroidManifest.xml:51:13-36
-58            <intent-filter>
-58-->/root/voicelistener/app/src/main/AndroidManifest.xml:52:13-54:29
-59                <action android:name="android.intent.action.BOOT_COMPLETED" />
-59-->/root/voicelistener/app/src/main/AndroidManifest.xml:53:17-79
-59-->/root/voicelistener/app/src/main/AndroidManifest.xml:53:25-76
-60            </intent-filter>
-61        </receiver>
-62    </application>
-63
-64</manifest>
+45        <activity
+45-->/root/voicelistener/app/src/main/AndroidManifest.xml:40:9-42:40
+46            android:name="com.micklab.voicelistener.OllamaDebugActivity"
+46-->/root/voicelistener/app/src/main/AndroidManifest.xml:41:13-48
+47            android:exported="false" />
+47-->/root/voicelistener/app/src/main/AndroidManifest.xml:42:13-37
+48
+49        <!-- 音声監視サービス -->
+50        <service
+50-->/root/voicelistener/app/src/main/AndroidManifest.xml:45:9-49:58
+51            android:name="com.micklab.voicelistener.VoiceListenerService"
+51-->/root/voicelistener/app/src/main/AndroidManifest.xml:46:13-49
+52            android:enabled="true"
+52-->/root/voicelistener/app/src/main/AndroidManifest.xml:47:13-35
+53            android:exported="false"
+53-->/root/voicelistener/app/src/main/AndroidManifest.xml:48:13-37
+54            android:foregroundServiceType="microphone" />
+54-->/root/voicelistener/app/src/main/AndroidManifest.xml:49:13-55
+55
+56        <!-- システム起動時の自動開始レシーバー -->
+57        <receiver
+57-->/root/voicelistener/app/src/main/AndroidManifest.xml:52:9-59:20
+58            android:name="com.micklab.voicelistener.BootReceiver"
+58-->/root/voicelistener/app/src/main/AndroidManifest.xml:53:13-41
+59            android:enabled="true"
+59-->/root/voicelistener/app/src/main/AndroidManifest.xml:54:13-35
+60            android:exported="true" >
+60-->/root/voicelistener/app/src/main/AndroidManifest.xml:55:13-36
+61            <intent-filter>
+61-->/root/voicelistener/app/src/main/AndroidManifest.xml:56:13-58:29
+62                <action android:name="android.intent.action.BOOT_COMPLETED" />
+62-->/root/voicelistener/app/src/main/AndroidManifest.xml:57:17-79
+62-->/root/voicelistener/app/src/main/AndroidManifest.xml:57:25-76
+63            </intent-filter>
+64        </receiver>
+65    </application>
+66
+67</manifest>

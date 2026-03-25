@@ -1,0 +1,2 @@
+com.micklab.voicelistener
+string jna_library_appname

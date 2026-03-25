@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.micklab.voicelistener.PendingSummaryBufferTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-03-24T21:11:02" hostname="localhost" time="0.002">
+<testsuite name="com.micklab.voicelistener.PendingSummaryBufferTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-03-25T09:53:20" hostname="localhost" time="0.001">
   <properties/>
-  <testcase name="removeConsumedPrefix_preservesNewerEntries" classname="com.micklab.voicelistener.PendingSummaryBufferTest" time="0.001"/>
-  <testcase name="removeConsumedPrefix_returnsCurrentWhenPrefixDoesNotMatch" classname="com.micklab.voicelistener.PendingSummaryBufferTest" time="0.0"/>
+  <testcase name="removeConsumedPrefix_preservesNewerEntries" classname="com.micklab.voicelistener.PendingSummaryBufferTest" time="0.0"/>
+  <testcase name="removeConsumedPrefix_returnsCurrentWhenPrefixDoesNotMatch" classname="com.micklab.voicelistener.PendingSummaryBufferTest" time="0.001"/>
   <testcase name="appendEntry_joinsNormalizedEntriesWithNewlines" classname="com.micklab.voicelistener.PendingSummaryBufferTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

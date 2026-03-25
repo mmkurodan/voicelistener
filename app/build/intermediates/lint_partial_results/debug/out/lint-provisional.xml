@@ -1,0 +1,19 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<incidents format="6" by="lint 8.2.2" type="conditional_incidents">
+
+    <incident
+        id="MissingPermission"
+        severity="error"
+        message="Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with `checkPermission`) or explicitly handle a potential `SecurityException`">
+        <fix-data missing="android.permission.RECORD_AUDIO" requirement="android.permission.RECORD_AUDIO"/>
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/VoiceListenerService.java"
+            line="1146"
+            column="29"
+            startOffset="45864"
+            endLine="1152"
+            endColumn="18"
+            endOffset="46070"/>
+    </incident>
+
+</incidents>

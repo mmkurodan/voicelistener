@@ -1,0 +1,4 @@
+#Wed Mar 25 09:42:02 UTC 2026
+base.0=/root/voicelistener/app/build/intermediates/dex/release/mergeDexRelease/classes.dex
+path.0=classes.dex
+renamed.0=classes.dex

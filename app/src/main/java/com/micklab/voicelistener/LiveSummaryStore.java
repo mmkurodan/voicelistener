@@ -14,6 +14,7 @@ public final class LiveSummaryStore {
     private static final String PREF_OLLAMA_BASE_URL_MIGRATED = "ollama_base_url_migrated";
     private static final String PREF_OLLAMA_MODEL = "ollama_model";
     private static final String PREF_OLLAMA_MODELS_JSON = "ollama_models_json";
+    private static final String PREF_OLLAMA_DEBUG_JSON = "ollama_debug_json";
     private static final String PREF_LIVE_SUMMARY_JSON = "live_summary_json";
     private static final String PREF_PENDING_SUMMARY_LOGS = "pending_summary_logs";
     private static final String PREF_SUMMARY_FORCE_CHAR_THRESHOLD = "summary_force_char_threshold";
@@ -100,6 +101,17 @@ public final class LiveSummaryStore {
             .apply();
     }
 
+    public static OllamaDebugState loadOllamaDebugState(Context context) {
+        return OllamaDebugState.fromJsonString(getPrefs(context).getString(PREF_OLLAMA_DEBUG_JSON, null));
+    }
+
+    public static void saveOllamaDebugState(Context context, OllamaDebugState state) {
+        OllamaDebugState safeState = state == null ? OllamaDebugState.empty() : state;
+        getPrefs(context).edit()
+            .putString(PREF_OLLAMA_DEBUG_JSON, safeState.toJsonString())
+            .apply();
+    }
+
     public static synchronized String getPendingSummaryLogs(Context context) {
         return PendingSummaryBuffer.normalizeBlock(
             getPrefs(context).getString(PREF_PENDING_SUMMARY_LOGS, null)
@@ -160,6 +172,7 @@ public final class LiveSummaryStore {
         prefs.edit()
             .putLong(PREF_SUMMARY_REVISION, nextRevision)
             .putString(PREF_LIVE_SUMMARY_JSON, LiveSummaryState.empty().toJsonString())
+            .putString(PREF_OLLAMA_DEBUG_JSON, OllamaDebugState.empty().toJsonString())
             .putString(PREF_PENDING_SUMMARY_LOGS, "")
             .apply();
     }

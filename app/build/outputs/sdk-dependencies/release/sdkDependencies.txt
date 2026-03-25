@@ -1,0 +1,46 @@
+# List of SDK dependencies of this app, this information is also included in an encrypted form in the APK.
+# For more information visit: https://d.android.com/r/tools/dependency-metadata
+
+library {
+  maven_library {
+    groupId: "com.alphacephei"
+    artifactId: "vosk-android"
+    version: "0.3.47"
+  }
+  digests {
+    sha256: "\343\270+\270wu5i\365\345\360\a\200~K\306\026\\4\272\004\347r\321\337\223U*\360\322\177\372"
+  }
+  repo_index {
+    value: 1
+  }
+}
+library {
+  maven_library {
+    groupId: "net.java.dev.jna"
+    artifactId: "jna"
+    version: "5.13.0"
+  }
+  digests {
+    sha256: ":\003\332\365\247!\"\001\303\251\264OsM\374\233\253\263\255\334\265\313\372c\237\237S^\210y%\300"
+  }
+  repo_index {
+    value: 1
+  }
+}
+library_dependencies {
+  library_dep_index: 1
+}
+module_dependencies {
+  module_name: "base"
+  dependency_index: 0
+}
+repositories {
+  maven_repo {
+    url: "https://dl.google.com/dl/android/maven2/"
+  }
+}
+repositories {
+  maven_repo {
+    url: "https://repo.maven.apache.org/maven2/"
+  }
+}

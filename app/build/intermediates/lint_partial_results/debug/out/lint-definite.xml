@@ -1,0 +1,405 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<incidents format="6" by="lint 8.2.2" type="incidents">
+
+    <incident
+        id="ClickableViewAccessibility"
+        severity="warning"
+        message="`onTouch` lambda should call `View#performClick` when a click is detected">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="411"
+            column="37"
+            startOffset="17347"
+            endLine="428"
+            endColumn="10"
+            endOffset="17987"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="136"
+            column="26"
+            startOffset="5214"
+            endLine="136"
+            endColumn="50"
+            endOffset="5238"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="147"
+            column="34"
+            startOffset="5758"
+            endLine="147"
+            endColumn="55"
+            endOffset="5779"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="String literal in `setText` can not be translated. Use Android resources instead.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="165"
+            column="38"
+            startOffset="6473"
+            endLine="165"
+            endColumn="53"
+            endOffset="6488"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="String literal in `setText` can not be translated. Use Android resources instead.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="196"
+            column="26"
+            startOffset="7637"
+            endLine="196"
+            endColumn="92"
+            endOffset="7703"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="String literal in `setText` can not be translated. Use Android resources instead.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="201"
+            column="36"
+            startOffset="7863"
+            endLine="201"
+            endColumn="48"
+            endOffset="7875"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="String literal in `setText` can not be translated. Use Android resources instead.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="221"
+            column="43"
+            startOffset="8785"
+            endLine="221"
+            endColumn="57"
+            endOffset="8799"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="String literal in `setText` can not be translated. Use Android resources instead.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="286"
+            column="36"
+            startOffset="11847"
+            endLine="286"
+            endColumn="48"
+            endOffset="11859"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="String literal in `setText` can not be translated. Use Android resources instead.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="297"
+            column="43"
+            startOffset="12344"
+            endLine="297"
+            endColumn="58"
+            endOffset="12359"/>
+    </incident>
+
+    <incident
+        id="ClickableViewAccessibility"
+        severity="warning"
+        message="Custom view ``EditText`` has `setOnTouchListener` called on it but does not override `performClick`">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="411"
+            column="9"
+            startOffset="17319"
+            endLine="428"
+            endColumn="11"
+            endOffset="17988"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="461"
+            column="32"
+            startOffset="19274"
+            endLine="461"
+            endColumn="47"
+            endOffset="19289"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="519"
+            column="36"
+            startOffset="21678"
+            endLine="519"
+            endColumn="51"
+            endOffset="21693"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="529"
+            column="32"
+            startOffset="21998"
+            endLine="529"
+            endColumn="47"
+            endOffset="22013"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="596"
+            column="28"
+            startOffset="24266"
+            endLine="596"
+            endColumn="47"
+            endOffset="24285"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="747"
+            column="51"
+            startOffset="30542"
+            endLine="747"
+            endColumn="73"
+            endOffset="30564"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="String literal in `setText` can not be translated. Use Android resources instead.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="747"
+            column="51"
+            startOffset="30542"
+            endLine="747"
+            endColumn="61"
+            endOffset="30552"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="752"
+            column="51"
+            startOffset="30845"
+            endLine="752"
+            endColumn="102"
+            endOffset="30896"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="String literal in `setText` can not be translated. Use Android resources instead.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="752"
+            column="51"
+            startOffset="30845"
+            endLine="752"
+            endColumn="61"
+            endOffset="30855"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="759"
+            column="51"
+            startOffset="31259"
+            endLine="759"
+            endColumn="74"
+            endOffset="31282"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="String literal in `setText` can not be translated. Use Android resources instead.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="759"
+            column="51"
+            startOffset="31259"
+            endLine="759"
+            endColumn="62"
+            endOffset="31270"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="String literal in `setText` can not be translated. Use Android resources instead.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="761"
+            column="51"
+            startOffset="31356"
+            endLine="761"
+            endColumn="65"
+            endOffset="31370"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="783"
+            column="35"
+            startOffset="32210"
+            endLine="783"
+            endColumn="52"
+            endOffset="32227"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="790"
+            column="38"
+            startOffset="32520"
+            endLine="790"
+            endColumn="61"
+            endOffset="32543"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="String literal in `setText` can not be translated. Use Android resources instead.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/MainActivity.java"
+            line="790"
+            column="38"
+            startOffset="32520"
+            endLine="790"
+            endColumn="52"
+            endOffset="32534"/>
+    </incident>
+
+    <incident
+        id="SetTextI18n"
+        severity="warning"
+        message="Do not concatenate text displayed with `setText`. Use resource string with placeholders.">
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/SummaryActivity.java"
+            line="144"
+            column="35"
+            startOffset="5281"
+            endLine="144"
+            endColumn="52"
+            endOffset="5298"/>
+    </incident>
+
+    <incident
+        id="ObsoleteSdkInt"
+        severity="warning"
+        message="Unnecessary; SDK_INT is always >= 24">
+        <fix-data conditional="true"/>
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/VoiceListenerService.java"
+            line="304"
+            column="13"
+            startOffset="14008"
+            endLine="304"
+            endColumn="59"
+            endOffset="14054"/>
+    </incident>
+
+    <incident
+        id="WakelockTimeout"
+        severity="warning"
+        message="Provide a timeout when requesting a wakelock with `PowerManager.Wakelock.acquire(long timeout)`. This will ensure the OS will cleanup any wakelocks that last longer than you intend, and will save your user&apos;s battery.">
+        <fix-replace
+            description="Set timeout to 10 minutes"
+            oldPattern="acquire\s*\(()\s*\)"
+            replacement="10*60*1000L /*10 minutes*/"/>
+        <location
+            file="${:app*debug*MAIN*sourceProvider*0*javaDir*0}/com/micklab/voicelistener/VoiceListenerService.java"
+            line="340"
+            column="17"
+            startOffset="15409"
+            endLine="340"
+            endColumn="38"
+            endOffset="15430"/>
+    </incident>
+
+    <incident
+        id="OldTargetApi"
+        severity="warning"
+        message="Not targeting the latest versions of Android; compatibility modes apply. Consider testing and updating this version. Consult the android.os.Build.VERSION_CODES javadoc for details.">
+        <fix-replace
+            description="Update targetSdkVersion to 35"
+            oldString="34"
+            replacement="35"/>
+        <location
+            file="${:app*projectDir}/build.gradle"
+            line="12"
+            column="9"
+            startOffset="213"
+            endLine="12"
+            endColumn="21"
+            endOffset="225"/>
+    </incident>
+
+</incidents>

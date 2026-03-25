@@ -1,0 +1,170 @@
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/VoiceListenerService.java:1146: Error: Call requires permission which may be rejected by user: code should explicitly check to see if permission is available (with checkPermission) or explicitly handle a potential SecurityException [MissingPermission]
+                candidate = new AudioRecord(
+                            ^
+
+   Explanation for issues of type "MissingPermission":
+   This check scans through your code and libraries and looks at the APIs
+   being used, and checks this against the set of permissions required to
+   access those APIs. If the code using those APIs is called at runtime, then
+   the program will crash.
+
+   Furthermore, for permissions that are revocable (with targetSdkVersion 23),
+   client code must also be prepared to handle the calls throwing an exception
+   if the user rejects the request for permission at runtime.
+
+/root/voicelistener/app/build.gradle:12: Warning: Not targeting the latest versions of Android; compatibility modes apply. Consider testing and updating this version. Consult the android.os.Build.VERSION_CODES javadoc for details. [OldTargetApi]
+        targetSdk 34
+        ~~~~~~~~~~~~
+
+   Explanation for issues of type "OldTargetApi":
+   When your application runs on a version of Android that is more recent than
+   your targetSdkVersion specifies that it has been tested with, various
+   compatibility modes kick in. This ensures that your application continues
+   to work, but it may look out of place. For example, if the targetSdkVersion
+   is less than 14, your app may get an option button in the UI.
+
+   To fix this issue, set the targetSdkVersion to the highest available value.
+   Then test your app to make sure everything works correctly. You may want to
+   consult the compatibility notes to see what changes apply to each version
+   you are adding support for:
+   https://developer.android.com/reference/android/os/Build.VERSION_CODES.html
+   as well as follow this guide:
+   https://developer.android.com/distribute/best-practices/develop/target-sdk.
+   html
+
+   https://developer.android.com/distribute/best-practices/develop/target-sdk.html
+
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/VoiceListenerService.java:340: Warning: Provide a timeout when requesting a wakelock with PowerManager.Wakelock.acquire(long timeout). This will ensure the OS will cleanup any wakelocks that last longer than you intend, and will save your user's battery. [WakelockTimeout]
+                cpuWakeLock.acquire();
+                ~~~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "WakelockTimeout":
+   Wakelocks have two acquire methods: one with a timeout, and one without.
+   You should generally always use the one with a timeout. A typical timeout
+   is 10 minutes. If the task takes longer than it is critical that it happens
+   (i.e. can't use JobScheduler) then maybe they should consider a foreground
+   service instead (which is a stronger run guarantee and lets the user know
+   something long/important is happening).
+
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/VoiceListenerService.java:304: Warning: Unnecessary; SDK_INT is always >= 24 [ObsoleteSdkInt]
+            Build.VERSION.SDK_INT >= Build.VERSION_CODES.M ? PendingIntent.FLAG_IMMUTABLE : 0
+            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "ObsoleteSdkInt":
+   This check flags version checks that are not necessary, because the
+   minSdkVersion (or surrounding known API level) is already at least as high
+   as the version checked for.
+
+   Similarly, it also looks for resources in -vNN folders, such as values-v14
+   where the version qualifier is less than or equal to the minSdkVersion,
+   where the contents should be merged into the best folder.
+
+/root/voicelistener/app/src/main/AndroidManifest.xml:20: Warning: Should explicitly set android:icon, there is no default [MissingApplicationIcon]
+    <application
+     ~~~~~~~~~~~
+
+   Explanation for issues of type "MissingApplicationIcon":
+   You should set an icon for the application as whole because there is no
+   default. This attribute must be set as a reference to a drawable resource
+   containing the image (for example @drawable/icon).
+
+   https://developer.android.com/studio/publish/preparing#publishing-configure
+
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:411: Warning: Custom view `EditText` has setOnTouchListener called on it but does not override performClick [ClickableViewAccessibility]
+        textArea.setOnTouchListener((v, event) -> {
+        ^
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:411: Warning: onTouch lambda should call View#performClick when a click is detected [ClickableViewAccessibility]
+        textArea.setOnTouchListener((v, event) -> {
+                                    ^
+
+   Explanation for issues of type "ClickableViewAccessibility":
+   If a View that overrides onTouchEvent or uses an OnTouchListener does not
+   also implement performClick and call it when clicks are detected, the View
+   may not handle accessibility actions properly. Logic handling the click
+   actions should ideally be placed in View#performClick as some accessibility
+   services invoke performClick when a click action should occur.
+
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:136: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+        vadLabel.setText("音声感度 (閾値): " + savedInt);
+                         ~~~~~~~~~~~~~~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:147: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+                vadLabel.setText("音声感度 (閾値): " + value);
+                                 ~~~~~~~~~~~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:165: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+        volumeIndicatorLabel.setText("入力音量 (RMS): 0");
+                                     ~~~~~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:196: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+        urlInput.setText("https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip");
+                         ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:201: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+        replaceModelButton.setText("モデルロード/再DL");
+                                   ~~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:221: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+        modelDownloadProgressText.setText("モデルDL進捗: 待機中");
+                                          ~~~~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:286: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+        ollamaSectionLabel.setText("Ollama互換要約");
+                                   ~~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:297: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+        refreshOllamaModelsButton.setText("Ollamaモデル一覧取得");
+                                          ~~~~~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:461: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+            statusText.setText("ステータス: " + msg);
+                               ~~~~~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:519: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+                statusText.setText("ステータス: " + msg);
+                                   ~~~~~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:529: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+            statusText.setText("ステータス: " + msg);
+                               ~~~~~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:596: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+        statusText.setText("ステータス: " + display);
+                           ~~~~~~~~~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:747: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+                modelDownloadProgressText.setText("モデルDL中: " + modelName);
+                                                  ~~~~~~~~~~~~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:747: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+                modelDownloadProgressText.setText("モデルDL中: " + modelName);
+                                                  ~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:752: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+                modelDownloadProgressText.setText("モデルDL中 (" + modelName + "): " + safeProgress + "%");
+                                                  ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:752: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+                modelDownloadProgressText.setText("モデルDL中 (" + modelName + "): " + safeProgress + "%");
+                                                  ~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:759: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+                modelDownloadProgressText.setText("モデルDL完了: " + modelName);
+                                                  ~~~~~~~~~~~~~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:759: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+                modelDownloadProgressText.setText("モデルDL完了: " + modelName);
+                                                  ~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:761: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+                modelDownloadProgressText.setText("モデルDL進捗: 待機中");
+                                                  ~~~~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:783: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+        summaryStatusText.setText("要約状態: " + status);
+                                  ~~~~~~~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:790: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+        volumeIndicatorLabel.setText("入力音量 (RMS): " + rmsInt);
+                                     ~~~~~~~~~~~~~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/MainActivity.java:790: Warning: String literal in setText can not be translated. Use Android resources instead. [SetTextI18n]
+        volumeIndicatorLabel.setText("入力音量 (RMS): " + rmsInt);
+                                     ~~~~~~~~~~~~~~
+/root/voicelistener/app/src/main/java/com/micklab/voicelistener/SummaryActivity.java:144: Warning: Do not concatenate text displayed with setText. Use resource string with placeholders. [SetTextI18n]
+        summaryStatusText.setText("要約状態: " + status);
+                                  ~~~~~~~~~~~~~~~~~
+
+   Explanation for issues of type "SetTextI18n":
+   When calling TextView#setText
+   * Never call Number#toString() to format numbers; it will not handle
+   fraction separators and locale-specific digits properly. Consider using
+   String#format with proper format specifications (%d or %f) instead.
+   * Do not pass a string literal (e.g. "Hello") to display text. Hardcoded
+   text can not be properly translated to other languages. Consider using
+   Android resource strings instead.
+   * Do not build messages by concatenating text chunks. Such messages can not
+   be properly translated.
+
+   https://developer.android.com/guide/topics/resources/localization.html
+
+1 errors, 29 warnings

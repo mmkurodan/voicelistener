@@ -1,0 +1,14 @@
+<dependencies>
+  <compile
+      roots=":@@:app::debug,com.alphacephei:vosk-android:0.3.47@aar,net.java.dev.jna:jna:5.13.0@aar">
+    <dependency
+        name=":@@:app::debug"
+        simpleName="artifacts::app"/>
+    <dependency
+        name="com.alphacephei:vosk-android:0.3.47@aar"
+        simpleName="com.alphacephei:vosk-android"/>
+    <dependency
+        name="net.java.dev.jna:jna:5.13.0@aar"
+        simpleName="net.java.dev.jna:jna"/>
+  </compile>
+</dependencies>

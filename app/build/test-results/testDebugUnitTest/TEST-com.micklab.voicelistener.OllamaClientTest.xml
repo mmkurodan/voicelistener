@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.micklab.voicelistener.OllamaClientTest" tests="1" skipped="0" failures="0" errors="0" timestamp="2026-03-25T09:53:20" hostname="localhost" time="0.001">
+  <properties/>
+  <testcase name="buildSummaryPrompt_keepsExistingStateUnlessContradicted" classname="com.micklab.voicelistener.OllamaClientTest" time="0.001"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

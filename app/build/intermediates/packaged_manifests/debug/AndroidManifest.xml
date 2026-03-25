@@ -42,6 +42,9 @@
         <activity
             android:name="com.micklab.voicelistener.SummaryActivity"
             android:exported="false" />
+        <activity
+            android:name="com.micklab.voicelistener.OllamaDebugActivity"
+            android:exported="false" />
 
         <!-- 音声監視サービス -->
         <service

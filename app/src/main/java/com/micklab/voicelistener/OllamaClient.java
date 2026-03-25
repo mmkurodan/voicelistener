@@ -26,6 +26,53 @@ public class OllamaClient {
     private static final int READ_TIMEOUT_MS = 120000;
     private static final int MAX_LOG_CONTEXT_CHARS = 6000;
 
+    public static final class SummaryGenerationResult {
+        private final String prompt;
+        private final String rawResponse;
+        private final LiveSummaryState state;
+
+        SummaryGenerationResult(String prompt, String rawResponse, LiveSummaryState state) {
+            this.prompt = prompt == null ? "" : prompt;
+            this.rawResponse = rawResponse == null ? "" : rawResponse;
+            this.state = state == null ? LiveSummaryState.empty() : state;
+        }
+
+        public String getPrompt() {
+            return prompt;
+        }
+
+        public String getRawResponse() {
+            return rawResponse;
+        }
+
+        public LiveSummaryState getState() {
+            return state;
+        }
+    }
+
+    public static final class SummaryGenerationException extends IOException {
+        private final String prompt;
+        private final String rawResponse;
+
+        SummaryGenerationException(String message, String prompt, String rawResponse, Throwable cause) {
+            super(message, cause);
+            this.prompt = prompt == null ? "" : prompt;
+            this.rawResponse = rawResponse == null ? "" : rawResponse;
+        }
+
+        SummaryGenerationException(String message, String prompt, String rawResponse) {
+            this(message, prompt, rawResponse, null);
+        }
+
+        public String getPrompt() {
+            return prompt;
+        }
+
+        public String getRawResponse() {
+            return rawResponse;
+        }
+    }
+
     public List<String> listModelNames(String baseUrl) throws IOException {
         HttpURLConnection connection = null;
         try {
@@ -66,12 +113,22 @@ public class OllamaClient {
         }
     }
 
-    public LiveSummaryState generateSummary(String baseUrl, String model, String recentRecognitionLogs, LiveSummaryState previousState) throws IOException {
+    public SummaryGenerationResult generateSummary(String baseUrl, String model, String recentRecognitionLogs, LiveSummaryState previousState) throws IOException {
         if (recentRecognitionLogs == null || recentRecognitionLogs.trim().isEmpty()) {
-            return previousState == null ? LiveSummaryState.empty() : previousState;
+            LiveSummaryState safeState = previousState == null ? LiveSummaryState.empty() : previousState;
+            return new SummaryGenerationResult("", "", safeState);
+        }
+        return generateSummaryFromPrompt(baseUrl, model, buildSummaryPrompt(recentRecognitionLogs, previousState));
+    }
+
+    SummaryGenerationResult generateSummaryFromPrompt(String baseUrl, String model, String prompt) throws IOException {
+        String safePrompt = prompt == null ? "" : prompt.trim();
+        if (safePrompt.isEmpty()) {
+            throw new SummaryGenerationException("要約プロンプトが空です", safePrompt, "");
         }
 
         HttpURLConnection connection = null;
+        String rawResponse = "";
         try {
             URL url = new URL(normalizeBaseUrl(baseUrl) + "/api/generate");
             connection = (HttpURLConnection) url.openConnection();
@@ -85,27 +142,42 @@ public class OllamaClient {
             JSONObject requestBody = new JSONObject();
             requestBody.put("model", normalizeModel(model));
             requestBody.put("stream", false);
-            requestBody.put("prompt", buildPrompt(recentRecognitionLogs, previousState));
+            requestBody.put("prompt", safePrompt);
 
             try (OutputStream out = new BufferedOutputStream(connection.getOutputStream())) {
                 out.write(requestBody.toString().getBytes(StandardCharsets.UTF_8));
                 out.flush();
             }
 
-            ensureSuccess(connection);
+            int code = connection.getResponseCode();
+            rawResponse = code / 100 == 2
+                ? readResponseBody(connection)
+                : readStream(connection.getErrorStream());
+            if (code / 100 != 2) {
+                throw new SummaryGenerationException("HTTP " + code + ": " + rawResponse, safePrompt, rawResponse);
+            }
 
-            JSONObject response = new JSONObject(readResponseBody(connection));
+            JSONObject response = new JSONObject(rawResponse);
             String body = response.optString("response", "").trim();
             JSONObject parsed = new JSONObject(extractJsonObject(body));
-            return new LiveSummaryState(
-                parsed.optString("summary", ""),
-                toStringList(parsed.optJSONArray("decisions")),
-                toStringList(parsed.optJSONArray("todos")),
-                "",
-                0L
+            return new SummaryGenerationResult(
+                safePrompt,
+                rawResponse,
+                new LiveSummaryState(
+                    parsed.optString("summary", ""),
+                    toStringList(parsed.optJSONArray("decisions")),
+                    toStringList(parsed.optJSONArray("todos")),
+                    "",
+                    0L
+                )
             );
         } catch (JSONException e) {
-            throw new IOException("要約レスポンスのJSON解析に失敗しました", e);
+            throw new SummaryGenerationException("要約レスポンスのJSON解析に失敗しました", safePrompt, rawResponse, e);
+        } catch (SummaryGenerationException e) {
+            throw e;
+        } catch (IOException e) {
+            String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            throw new SummaryGenerationException(message, safePrompt, rawResponse, e);
         } finally {
             if (connection != null) {
                 connection.disconnect();
@@ -140,7 +212,7 @@ public class OllamaClient {
         }
     }
 
-    private String buildPrompt(String recentRecognitionLogs, LiveSummaryState previousState) {
+    String buildSummaryPrompt(String recentRecognitionLogs, LiveSummaryState previousState) {
         String clippedLogs = recentRecognitionLogs.trim();
         if (clippedLogs.length() > MAX_LOG_CONTEXT_CHARS) {
             clippedLogs = clippedLogs.substring(clippedLogs.length() - MAX_LOG_CONTEXT_CHARS);
@@ -148,7 +220,7 @@ public class OllamaClient {
 
         LiveSummaryState safePrevious = previousState == null ? LiveSummaryState.empty() : previousState;
         return "あなたは会議メモ整理アシスタントです。\n"
-            + "以下の新規認識ログ差分と前回状態を使って、会議全体の要約・決定事項・未完了ToDoを再生成してください。\n"
+            + "以下の既存状態と新規認識ログ差分を使って、会議全体の要約・決定事項・未完了ToDoを再生成してください。\n"
             + "必ずJSONオブジェクトのみを返してください。説明文は不要です。\n"
             + "形式:\n"
             + "{\"summary\":\"80文字以内\",\"decisions\":[\"...\"],\"todos\":[\"...\"]}\n"
@@ -157,8 +229,17 @@ public class OllamaClient {
             + "- summaryは前回内容を踏まえた最新の全体要約にする。\n"
             + "- decisionsは決定済み・合意済みのみ。\n"
             + "- todosは未完了の作業のみ。完了済みは除外する。\n"
+            + "- 既存の要約・決定事項・ToDoは会議の継続文脈として扱い、新規ログと矛盾しない限り優先して残す。\n"
+            + "- 既存項目を削除・変更するのは、新規ログにより明確な矛盾・撤回・完了が確認できる場合のみにする。\n"
             + "- 重複は統合する。\n"
             + "- 情報が不足する項目は空文字または空配列にする。\n"
+            + "既存の要約:\n"
+            + formatPromptText(safePrevious.getSummary())
+            + "\n既存の決定事項:\n"
+            + formatPromptList(safePrevious.getDecisions())
+            + "\n既存のToDo:\n"
+            + formatPromptList(safePrevious.getTodos())
+            + "\n"
             + "前回状態:\n"
             + safePrevious.toJsonString()
             + "\n新規認識ログ差分:\n"
@@ -247,5 +328,24 @@ public class OllamaClient {
     private String normalizeModel(String model) {
         String trimmed = model == null ? "" : model.trim();
         return trimmed.isEmpty() ? "default" : trimmed;
+    }
+
+    private String formatPromptText(String value) {
+        String normalized = value == null ? "" : value.trim();
+        return normalized.isEmpty() ? "（なし）" : normalized;
+    }
+
+    private String formatPromptList(List<String> values) {
+        if (values == null || values.isEmpty()) {
+            return "（なし）";
+        }
+        StringBuilder builder = new StringBuilder();
+        for (String value : values) {
+            if (builder.length() > 0) {
+                builder.append('\n');
+            }
+            builder.append("・").append(value);
+        }
+        return builder.toString();
     }
 }

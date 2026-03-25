@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="utf-8"?>
+<manifest xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.micklab.voicelistener"
+    android:versionCode="1"
+    android:versionName="1.0" >
+
+    <uses-sdk
+        android:minSdkVersion="24"
+        android:targetSdkVersion="34" />
+
+    <!-- 音声録音権限 -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.WAKE_LOCK" />
+
+    <!-- フォアグラウンドサービス権限 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MICROPHONE" />
+
+    <!-- システム起動時の自動開始 -->
+    <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED" />
+
+    <!-- ネットワーク（モデルダウンロード） -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <!-- 通知権限 -->
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+
+    <application
+        android:extractNativeLibs="false"
+        android:label="voicelistener"
+        android:theme="@android:style/Theme.Material.Light"
+        android:usesCleartextTraffic="true" >
+        <activity
+            android:name="com.micklab.voicelistener.MainActivity"
+            android:exported="true" >
+            <intent-filter>
+                <action android:name="android.intent.action.MAIN" />
+
+                <category android:name="android.intent.category.LAUNCHER" />
+            </intent-filter>
+        </activity>
+        <activity
+            android:name="com.micklab.voicelistener.SummaryActivity"
+            android:exported="false" />
+
+        <!-- 音声監視サービス -->
+        <service
+            android:name="com.micklab.voicelistener.VoiceListenerService"
+            android:enabled="true"
+            android:exported="false"
+            android:foregroundServiceType="microphone" />
+
+        <!-- システム起動時の自動開始レシーバー -->
+        <receiver
+            android:name="com.micklab.voicelistener.BootReceiver"
+            android:enabled="true"
+            android:exported="true" >
+            <intent-filter>
+                <action android:name="android.intent.action.BOOT_COMPLETED" />
+            </intent-filter>
+        </receiver>
+    </application>
+
+</manifest>

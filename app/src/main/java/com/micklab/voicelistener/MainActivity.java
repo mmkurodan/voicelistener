@@ -345,6 +345,14 @@ public class MainActivity extends Activity {
         });
         layout.addView(openSummaryButton);
 
+        Button openOllamaDebugButton = new Button(this);
+        openOllamaDebugButton.setText("Ollama入出力画面を開く");
+        openOllamaDebugButton.setOnClickListener(v -> {
+            saveSummarySettingsFromInputs();
+            startActivity(new Intent(this, OllamaDebugActivity.class));
+        });
+        layout.addView(openOllamaDebugButton);
+
         // ログ初期化ボタン
         Button clearLogsButton = new Button(this);
         clearLogsButton.setText("ログ初期化");

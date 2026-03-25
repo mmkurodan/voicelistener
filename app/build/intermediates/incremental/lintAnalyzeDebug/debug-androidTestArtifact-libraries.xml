@@ -1,0 +1,31 @@
+<libraries>
+  <library
+      name="com.alphacephei:vosk-android:0.3.47@aar"
+      jars="/root/.gradle/caches/8.12/transforms/bda715fc587fc97d3f8c75dc1b90fdde/transformed/jetified-vosk-android-0.3.47/jars/classes.jar"
+      resolved="com.alphacephei:vosk-android:0.3.47"
+      folder="/root/.gradle/caches/8.12/transforms/bda715fc587fc97d3f8c75dc1b90fdde/transformed/jetified-vosk-android-0.3.47"
+      manifest="AndroidManifest.xml"
+      resFolder="res"
+      assetsFolder="assets"
+      lintJar="lint.jar"
+      publicResources="public.txt"
+      symbolFile="R.txt"
+      externalAnnotations="annotations.zip"
+      proguardRules="proguard.txt"/>
+  <library
+      name="net.java.dev.jna:jna:5.13.0@aar"
+      jars="/root/.gradle/caches/8.12/transforms/1d30e27336856678c5310dcd3c99e0d6/transformed/jetified-jna-5.13.0/jars/classes.jar"
+      resolved="net.java.dev.jna:jna:5.13.0"
+      folder="/root/.gradle/caches/8.12/transforms/1d30e27336856678c5310dcd3c99e0d6/transformed/jetified-jna-5.13.0"
+      manifest="AndroidManifest.xml"
+      resFolder="res"
+      assetsFolder="assets"
+      lintJar="lint.jar"
+      publicResources="public.txt"
+      symbolFile="R.txt"
+      externalAnnotations="annotations.zip"
+      proguardRules="proguard.txt"/>
+  <library
+      name=":@@:app::debug"
+      project=":app"/>
+</libraries>

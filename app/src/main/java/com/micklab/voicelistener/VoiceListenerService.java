@@ -54,7 +54,7 @@ public class VoiceListenerService extends Service {
     private static final int SAMPLE_RATE_HZ = 16000;
     private static final int CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO;
     private static final int AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT;
-    private static final int FRAME_SAMPLES = 320;
+    private static final int FRAME_SAMPLES = 1024;
     private static final int MAX_SILENCE_FRAMES = 15;
     private static final int MIN_SPEECH_FRAMES = 8;
     private static final double RMS_THRESHOLD = 900.0;
@@ -80,6 +80,7 @@ public class VoiceListenerService extends Service {
     public static final String ACTION_INSTALL_MODEL = "com.micklab.voicelistener.action.INSTALL_MODEL";
     public static final String ACTION_SELECT_MODEL = "com.micklab.voicelistener.action.SELECT_MODEL";
     public static final String ACTION_DELETE_MODEL = "com.micklab.voicelistener.action.DELETE_MODEL";
+    public static final String ACTION_REFRESH_RECOGNIZER = "com.micklab.voicelistener.action.REFRESH_RECOGNIZER";
     public static final String ACTION_STOP_MONITORING = "com.micklab.voicelistener.action.STOP_MONITORING";
     public static final String EXTRA_MODEL_URL = "com.micklab.voicelistener.extra.MODEL_URL";
     public static final String EXTRA_MODEL_NAME = "com.micklab.voicelistener.extra.MODEL_NAME";
@@ -87,7 +88,7 @@ public class VoiceListenerService extends Service {
 
     private LogManager2 logManager;
     private VoiceActivityDetector vad;
-    private OfflineAsrEngine asrEngine;
+    private SpeechRecognizerFacade speechRecognizerFacade;
     private ExecutorService transcriptionExecutor;
     private ExecutorService modelInstallerExecutor;
     private ScheduledExecutorService summaryExecutor;
@@ -136,6 +137,7 @@ public class VoiceListenerService extends Service {
         transcriptionExecutor = Executors.newSingleThreadExecutor();
         modelInstallerExecutor = Executors.newSingleThreadExecutor();
         summaryExecutor = Executors.newSingleThreadScheduledExecutor();
+        speechRecognizerFacade = SpeechRecognizerFacade.createDefault();
 
         createNotificationChannel();
         initializeRunLocks();
@@ -186,6 +188,17 @@ public class VoiceListenerService extends Service {
             if (!isCapturing) {
                 stopSelf();
             }
+        } else if (ACTION_REFRESH_RECOGNIZER.equals(action)) {
+            initializeAsrEngine();
+            if (logManager != null) {
+                try {
+                    logManager.writeLog("認識エンジン再読込: " + SpeechRecognitionPreferences.getActiveEngine(this).getDisplayName(), false);
+                } catch (Exception ignored) {
+                }
+            }
+            if (!isCapturing) {
+                stopSelf();
+            }
         } else if (ACTION_STOP_MONITORING.equals(action)) {
             // UIの停止要求: 録音は停止し、既にキューに入っている処理を完了したらサービスを終了する
             try { if (logManager != null) logManager.writeLog("監視停止要求を受信: 録音を停止し、保留処理完了後に終了します", false); } catch (Exception ignored) {}
@@ -201,6 +214,9 @@ public class VoiceListenerService extends Service {
                         boolean terminated = drainingExecutor.awaitTermination(120, TimeUnit.SECONDS);
                         if (!terminated) {
                             drainingExecutor.shutdownNow();
+                        }
+                        if (speechRecognizerFacade != null) {
+                            speechRecognizerFacade.stop();
                         }
                         cancelPendingSummaryTask();
                         shutdownSummaryExecutor(true);
@@ -221,6 +237,9 @@ public class VoiceListenerService extends Service {
             } else {
                 if (modelInstallerExecutor == null) modelInstallerExecutor = Executors.newSingleThreadExecutor();
                 modelInstallerExecutor.execute(() -> {
+                    if (speechRecognizerFacade != null) {
+                        speechRecognizerFacade.stop();
+                    }
                     cancelPendingSummaryTask();
                     shutdownSummaryExecutor(true);
                     refreshLiveSummary(true);
@@ -250,9 +269,9 @@ public class VoiceListenerService extends Service {
             transcriptionExecutor = null;
         }
 
-        if (asrEngine != null) {
-            asrEngine.shutdown();
-            asrEngine = null;
+        if (speechRecognizerFacade != null) {
+            speechRecognizerFacade.release();
+            speechRecognizerFacade = null;
         }
         if (modelInstallerExecutor != null) {
             modelInstallerExecutor.shutdownNow();
@@ -369,32 +388,85 @@ public class VoiceListenerService extends Service {
     }
 
     private void initializeAsrEngine() {
-        File preferredModelDir = resolvePreferredModelDir();
-        if (initializeAsrEngineWithModel(preferredModelDir)) {
+        EngineType activeEngineType = SpeechRecognitionPreferences.getActiveEngine(this);
+        boolean initialized = activeEngineType == EngineType.WHISPER
+            ? initializeWhisperEngine()
+            : initializeVoskEngineWithModel(resolvePreferredModelDir());
+        if (initialized) {
             return;
         }
 
-        asrEngine = new NoOpOfflineAsrEngine();
-        asrEngine.initialize();
-        Log.w(TAG, "ASR engine fallback: " + asrEngine.name() + " (model missing)");
+        if (speechRecognizerFacade != null) {
+            speechRecognizerFacade.setFallbackToNoOp();
+        }
+        Log.w(TAG, "ASR engine fallback: NoOp (" + activeEngineType.getDisplayName() + ")");
     }
 
     private void installModelIfMissingAsync(File modelDir) {
         installModelFromUrlAsync(modelDir, MODEL_ZIP_URL, false, false, true);
     }
 
-    private boolean initializeAsrEngineWithModel(File modelDir) {
+    private boolean initializeVoskEngineWithModel(File modelDir) {
         if (!hasModelContent(modelDir)) {
             return false;
         }
-        OfflineAsrEngine newEngine = new VoskOfflineAsrEngine(modelDir.getAbsolutePath());
-        if (!newEngine.initialize()) {
-            try { newEngine.shutdown(); } catch (Exception ignored) {}
+        SpeechRecognizerConfig config = new SpeechRecognizerConfig(
+            EngineType.VOSK,
+            modelDir.getAbsolutePath(),
+            SAMPLE_RATE_HZ,
+            "ja",
+            SpeechRecognizerConfig.defaultThreadCount()
+        );
+        if (!configureSpeechRecognizer(config)) {
             return false;
         }
-        replaceAsrEngine(newEngine);
-        Log.i(TAG, "ASR engine: " + newEngine.name() + " @ " + modelDir.getAbsolutePath());
+        Log.i(TAG, "ASR engine: " + config.getEngineType().getDisplayName() + " @ " + modelDir.getAbsolutePath());
         return true;
+    }
+
+    private boolean initializeWhisperEngine() {
+        try {
+            File modelFile = WhisperModelAssetInstaller.ensureBundledModelCopied(this);
+            if (modelFile == null || !modelFile.exists()) {
+                try { if (logManager != null) logManager.writeLog("Whisperモデルが見つかりません: assets/models/*.gguf", false); } catch (Exception ignored) {}
+                return false;
+            }
+            SpeechRecognizerConfig config = new SpeechRecognizerConfig(
+                EngineType.WHISPER,
+                modelFile.getAbsolutePath(),
+                SAMPLE_RATE_HZ,
+                "ja",
+                SpeechRecognizerConfig.defaultThreadCount()
+            );
+            if (!configureSpeechRecognizer(config)) {
+                return false;
+            }
+            Log.i(TAG, "ASR engine: " + config.getEngineType().getDisplayName() + " @ " + modelFile.getAbsolutePath());
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to prepare Whisper model", e);
+            try { if (logManager != null) logManager.writeLog("Whisperモデル準備失敗: " + e.getMessage(), false); } catch (Exception ignored) {}
+            return false;
+        }
+    }
+
+    private boolean configureSpeechRecognizer(SpeechRecognizerConfig config) {
+        if (speechRecognizerFacade == null) {
+            speechRecognizerFacade = SpeechRecognizerFacade.createDefault();
+        }
+        try {
+            speechRecognizerFacade.selectEngine(config);
+            return true;
+        } catch (Exception e) {
+            Log.e(TAG, "Speech recognizer configuration failed: " + config.getEngineType().getDisplayName(), e);
+            try {
+                if (logManager != null) {
+                    logManager.writeLog("認識エンジン初期化失敗 (" + config.getEngineType().getDisplayName() + "): " + e.getMessage(), false);
+                }
+            } catch (Exception ignored) {
+            }
+            return false;
+        }
     }
 
     private void installModelFromUrlAsync(File modelDir, String url, boolean replace, boolean stopServiceOnFinish, boolean activateAfterInstall) {
@@ -482,7 +554,7 @@ public class VoiceListenerService extends Service {
                         .apply();
                 }
 
-                if (activateAfterInstall) {
+                if (activateAfterInstall && SpeechRecognitionPreferences.getActiveEngine(this) == EngineType.VOSK) {
                     if (switchToModelName(modelName, false)) {
                         logManager.writeLog("ASRエンジン初期化成功");
                     } else {
@@ -621,21 +693,16 @@ public class VoiceListenerService extends Service {
         if (!hasModelContent(modelDir)) {
             return false;
         }
-
-        OfflineAsrEngine newEngine = new VoskOfflineAsrEngine(modelDir.getAbsolutePath());
-        if (!newEngine.initialize()) {
-            try { newEngine.shutdown(); } catch (Exception ignored) {}
-            return false;
-        }
-
-        replaceAsrEngine(newEngine);
         if (persistSelection && sharedPrefs != null) {
             sharedPrefs.edit()
                 .putString(PREF_ACTIVE_MODEL_NAME, normalizedModelName)
                 .remove(PREF_ACTIVE_MODEL_URL)
                 .apply();
         }
-        return true;
+        if (SpeechRecognitionPreferences.getActiveEngine(this) != EngineType.VOSK) {
+            return true;
+        }
+        return initializeVoskEngineWithModel(modelDir);
     }
 
     private boolean deleteModelByName(String modelName) {
@@ -654,32 +721,12 @@ public class VoiceListenerService extends Service {
                     .remove(PREF_ACTIVE_MODEL_NAME)
                     .remove(PREF_ACTIVE_MODEL_URL)
                     .apply();
-                initializeAsrEngine();
+                if (SpeechRecognitionPreferences.getActiveEngine(this) == EngineType.VOSK) {
+                    initializeAsrEngine();
+                }
             }
         }
         return deleted;
-    }
-
-    private void replaceAsrEngine(OfflineAsrEngine newEngine) {
-        Runnable swapTask = () -> {
-            OfflineAsrEngine oldEngine = asrEngine;
-            asrEngine = newEngine;
-            if (oldEngine != null && oldEngine != newEngine) {
-                try { oldEngine.shutdown(); } catch (Exception ignored) {}
-            }
-        };
-
-        if (!isCapturing) {
-            swapTask.run();
-            return;
-        }
-
-        ensureTranscriptionExecutor();
-        try {
-            transcriptionExecutor.execute(swapTask);
-        } catch (RejectedExecutionException e) {
-            swapTask.run();
-        }
     }
 
     private void ensureTranscriptionExecutor() {
@@ -1015,8 +1062,15 @@ public class VoiceListenerService extends Service {
         }
         ensureTranscriptionExecutor();
         ensureSummaryExecutor();
-        if (asrEngine == null || (asrEngine instanceof NoOpOfflineAsrEngine)) {
+        if (speechRecognizerFacade == null || !speechRecognizerFacade.hasActiveEngine()) {
             initializeAsrEngine();
+        }
+        if (speechRecognizerFacade == null || !speechRecognizerFacade.hasActiveEngine()) {
+            String msg = "認識エンジンを初期化できません。モデル設定を確認してください。";
+            Log.e(TAG, msg);
+            try { if (logManager != null) logManager.writeLog(msg, false); } catch (Exception ignored) {}
+            stopSelf();
+            return;
         }
 
         ArrayList<String> missing = new ArrayList<>();
@@ -1062,6 +1116,16 @@ public class VoiceListenerService extends Service {
             return;
         }
 
+        try {
+            speechRecognizerFacade.start();
+        } catch (RuntimeException e) {
+            Log.e(TAG, "Failed to start speech recognizer", e);
+            try { if (logManager != null) logManager.writeLog("認識エンジン開始失敗: " + e.getMessage(), false); } catch (Exception ignored) {}
+            audioRecord.release();
+            audioRecord = null;
+            return;
+        }
+
         enableAudioEffects();
         acquireRunLocks();
 
@@ -1069,6 +1133,7 @@ public class VoiceListenerService extends Service {
             audioRecord.startRecording();
         } catch (IllegalStateException | SecurityException e) {
             Log.e(TAG, "Failed to start recording", e);
+            try { speechRecognizerFacade.stop(); } catch (Exception ignored) {}
             releaseAudioEffects();
             releaseRunLocks();
             audioRecord.release();
@@ -1127,9 +1192,9 @@ public class VoiceListenerService extends Service {
 
         Runnable task = () -> {
             try {
-                OfflineAsrEngine engine = asrEngine; // snapshot to avoid race with shutdown
-                if (engine == null) return;
-                String recognizedText = engine.transcribe(segment, SAMPLE_RATE_HZ);
+                SpeechRecognizerFacade facade = speechRecognizerFacade; // snapshot to avoid race with release
+                if (facade == null) return;
+                String recognizedText = facade.transcribe(segment);
                 String normalizedText = recognizedText == null ? "" : recognizedText.replaceAll("\\s+", " ").trim();
                 if (!normalizedText.isEmpty()) {
                     if (logManager != null) {

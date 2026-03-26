@@ -78,10 +78,15 @@ public class MainActivity extends Activity {
 
     private Spinner modelSpinner;
     private ArrayAdapter<String> modelSpinnerAdapter;
+    private Spinner engineSpinner;
+    private ArrayAdapter<String> engineSpinnerAdapter;
+    private TextView recognizerStatusText;
+    private TextView whisperModelStatusText;
     private ProgressBar modelDownloadProgressBar;
     private TextView modelDownloadProgressText;
     private SeekBar volumeIndicatorSeekBar;
     private TextView volumeIndicatorLabel;
+    private LinearLayout voskModelSection;
     private boolean wasModelDownloadActive = false;
     private EditText ollamaBaseUrlInput;
     private Spinner ollamaModelSpinner;
@@ -89,9 +94,12 @@ public class MainActivity extends Activity {
     private EditText summaryForceCharsInput;
     private TextView summaryStatusText;
     private ExecutorService ollamaExecutor;
+    private ExecutorService backgroundExecutor;
     private final OllamaClient ollamaClient = new OllamaClient();
     private final SimpleDateFormat summaryTimeFormat = new SimpleDateFormat("HH:mm:ss", Locale.JAPAN);
     private boolean suppressOllamaSelectionCallback = false;
+    private boolean suppressEngineSelectionCallback = false;
+    private volatile boolean whisperModelPreparationInProgress = false;
     
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -100,6 +108,7 @@ public class MainActivity extends Activity {
         logManager = new LogManager2(this);
         prefs = getSharedPreferences("VoiceListenerPrefs", MODE_PRIVATE);
         ollamaExecutor = Executors.newSingleThreadExecutor();
+        backgroundExecutor = Executors.newSingleThreadExecutor();
         
         createUI();
         checkPermissions();
@@ -116,7 +125,50 @@ public class MainActivity extends Activity {
         statusText.setTextSize(16);
         statusText.setPadding(0, 0, 0, 10);
         layout.addView(statusText);
-        
+
+        TextView recognizerLabel = new TextView(this);
+        recognizerLabel.setText("認識エンジン:");
+        recognizerLabel.setPadding(0, 6, 0, 6);
+        layout.addView(recognizerLabel);
+
+        engineSpinner = new Spinner(this);
+        engineSpinnerAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, new ArrayList<>());
+        engineSpinnerAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        engineSpinnerAdapter.add(EngineType.VOSK.name());
+        engineSpinnerAdapter.add(EngineType.WHISPER.name());
+        engineSpinner.setAdapter(engineSpinnerAdapter);
+        engineSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, android.view.View view, int position, long id) {
+                if (suppressEngineSelectionCallback) {
+                    return;
+                }
+                saveRecognizerSettingsFromInputs();
+                updateRecognizerUiState();
+                if (getSelectedEngineType() == EngineType.WHISPER) {
+                    ensureWhisperModelReadyAsync(false);
+                }
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+        layout.addView(engineSpinner);
+
+        recognizerStatusText = new TextView(this);
+        recognizerStatusText.setPadding(0, 8, 0, 6);
+        layout.addView(recognizerStatusText);
+
+        Button applyEngineButton = new Button(this);
+        applyEngineButton.setText("選択エンジンを反映");
+        applyEngineButton.setOnClickListener(v -> applyRecognizerSelection());
+        layout.addView(applyEngineButton);
+
+        whisperModelStatusText = new TextView(this);
+        whisperModelStatusText.setPadding(0, 4, 0, 12);
+        layout.addView(whisperModelStatusText);
+         
         // VAD閾値スライダー + 音量インジケータ（同縮尺）
         float savedThreshold = prefs.getFloat("rms_threshold", 900.0f);
         int savedInt = (int) savedThreshold;
@@ -190,11 +242,21 @@ public class MainActivity extends Activity {
         stopButton.setEnabled(false);
         layout.addView(stopButton);
 
+        voskModelSection = new LinearLayout(this);
+        voskModelSection.setOrientation(LinearLayout.VERTICAL);
+        layout.addView(voskModelSection);
+
+        TextView voskSectionLabel = new TextView(this);
+        voskSectionLabel.setText("VOSK モデル");
+        voskSectionLabel.setTextSize(16);
+        voskSectionLabel.setPadding(0, 18, 0, 8);
+        voskModelSection.addView(voskSectionLabel);
+
         // モデルURL入力
         final EditText urlInput = new EditText(this);
         urlInput.setHint("モデルZIPのURLを入力 (例: https://...)");
         urlInput.setText("https://alphacephei.com/vosk/models/vosk-model-small-ja-0.22.zip");
-        layout.addView(urlInput);
+        voskModelSection.addView(urlInput);
 
         // モデルロード（同一URLは削除後に再取得）
         Button replaceModelButton = new Button(this);
@@ -215,28 +277,28 @@ public class MainActivity extends Activity {
             }
             Toast.makeText(this, "モデルロードを開始しました", Toast.LENGTH_SHORT).show();
         });
-        layout.addView(replaceModelButton);
+        voskModelSection.addView(replaceModelButton);
 
         modelDownloadProgressText = new TextView(this);
         modelDownloadProgressText.setText("モデルDL進捗: 待機中");
         modelDownloadProgressText.setPadding(0, 6, 0, 6);
-        layout.addView(modelDownloadProgressText);
+        voskModelSection.addView(modelDownloadProgressText);
 
         modelDownloadProgressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
         modelDownloadProgressBar.setMax(100);
         modelDownloadProgressBar.setProgress(0);
-        layout.addView(modelDownloadProgressBar);
+        voskModelSection.addView(modelDownloadProgressBar);
 
         TextView modelSelectLabel = new TextView(this);
         modelSelectLabel.setText("ダウンロード済みモデル:");
         modelSelectLabel.setPadding(0, 14, 0, 6);
-        layout.addView(modelSelectLabel);
+        voskModelSection.addView(modelSelectLabel);
 
         modelSpinner = new Spinner(this);
         modelSpinnerAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, new ArrayList<>());
         modelSpinnerAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         modelSpinner.setAdapter(modelSpinnerAdapter);
-        layout.addView(modelSpinner);
+        voskModelSection.addView(modelSpinner);
 
         // 選択モデルへ切替
         Button switchModelButton = new Button(this);
@@ -257,7 +319,7 @@ public class MainActivity extends Activity {
             }
             Toast.makeText(this, "モデル切替を要求しました: " + modelName, Toast.LENGTH_SHORT).show();
         });
-        layout.addView(switchModelButton);
+        voskModelSection.addView(switchModelButton);
 
         // 選択モデルの削除
         Button deleteModelButton = new Button(this);
@@ -280,7 +342,7 @@ public class MainActivity extends Activity {
             if (uiHandler == null) uiHandler = new Handler(Looper.getMainLooper());
             uiHandler.postDelayed(() -> refreshModelSpinner(true), 500);
         });
-        layout.addView(deleteModelButton);
+        voskModelSection.addView(deleteModelButton);
 
         TextView ollamaSectionLabel = new TextView(this);
         ollamaSectionLabel.setText("Ollama互換要約");
@@ -392,9 +454,12 @@ public class MainActivity extends Activity {
 
         refreshModelSpinner(false);
         refreshOllamaModelSpinner(false);
+        syncRecognizerSettingsInputs();
         updateDownloadProgressIndicator();
         updateVolumeIndicator();
         updateSummaryDisplay();
+        refreshWhisperModelStatus();
+        ensureWhisperModelReadyAsync(false);
 
         ScrollView rootScrollView = new ScrollView(this);
         rootScrollView.setFillViewport(true);
@@ -539,6 +604,17 @@ public class MainActivity extends Activity {
             return;
         }
 
+        saveRecognizerSettingsFromInputs();
+        if (getSelectedEngineType() == EngineType.WHISPER && !WhisperModelAssetInstaller.hasBundledModel(this)) {
+            String msg = "Whisperモデルが未配置です。assets/models/ に .gguf を追加してください。";
+            logManager.writeLog(msg);
+            statusText.setText("ステータス: " + msg);
+            Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
+            return;
+        }
+        if (getSelectedEngineType() == EngineType.WHISPER) {
+            ensureWhisperModelReadyAsync(false);
+        }
         saveSummarySettingsFromInputs();
         String selectedOllamaModel = getSelectedOllamaModelName();
         if (selectedOllamaModel != null) {
@@ -603,6 +679,9 @@ public class MainActivity extends Activity {
         }
         statusText.setText("ステータス: " + display);
         updateButtons();
+        if (recognizerStatusText != null) {
+            recognizerStatusText.setText("現在の認識エンジン設定: " + SpeechRecognitionPreferences.getActiveEngine(this).getDisplayName());
+        }
     }
 
     private File getModelsRootDir() {
@@ -705,6 +784,10 @@ public class MainActivity extends Activity {
         saveSummaryForceCharsFromInput();
     }
 
+    private void saveRecognizerSettingsFromInputs() {
+        SpeechRecognitionPreferences.setActiveEngine(this, getSelectedEngineType());
+    }
+
     private void syncSummarySettingsInputs() {
         if (summaryForceCharsInput != null) {
             summaryForceCharsInput.setText(String.valueOf(LiveSummaryStore.getSummaryForceCharThreshold(this)));
@@ -712,6 +795,121 @@ public class MainActivity extends Activity {
         if (ollamaBaseUrlInput != null) {
             ollamaBaseUrlInput.setText(LiveSummaryStore.getOllamaBaseUrl(this));
         }
+    }
+
+    private void syncRecognizerSettingsInputs() {
+        if (engineSpinnerAdapter == null || engineSpinner == null) {
+            return;
+        }
+        EngineType activeEngine = SpeechRecognitionPreferences.getActiveEngine(this);
+        int index = engineSpinnerAdapter.getPosition(activeEngine.name());
+        suppressEngineSelectionCallback = true;
+        if (index >= 0) {
+            engineSpinner.setSelection(index);
+        }
+        suppressEngineSelectionCallback = false;
+        updateRecognizerUiState();
+    }
+
+    private EngineType getSelectedEngineType() {
+        if (engineSpinner == null || engineSpinner.getSelectedItem() == null) {
+            return SpeechRecognitionPreferences.getActiveEngine(this);
+        }
+        return EngineType.fromPreference(String.valueOf(engineSpinner.getSelectedItem()));
+    }
+
+    private void updateRecognizerUiState() {
+        EngineType selectedEngine = getSelectedEngineType();
+        boolean whisperSelected = selectedEngine == EngineType.WHISPER;
+        if (recognizerStatusText != null) {
+            recognizerStatusText.setText("現在の認識エンジン設定: " + selectedEngine.getDisplayName());
+        }
+        if (voskModelSection != null) {
+            voskModelSection.setVisibility(whisperSelected ? View.GONE : View.VISIBLE);
+        }
+        if (whisperModelStatusText != null) {
+            whisperModelStatusText.setVisibility(whisperSelected ? View.VISIBLE : View.GONE);
+        }
+        refreshWhisperModelStatus();
+    }
+
+    private void applyRecognizerSelection() {
+        saveRecognizerSettingsFromInputs();
+        updateRecognizerUiState();
+        if (getSelectedEngineType() == EngineType.WHISPER) {
+            if (!WhisperModelAssetInstaller.hasBundledModel(this)) {
+                Toast.makeText(this, "Whisperモデルが未配置です。assets/models/ に .gguf を追加してください。", Toast.LENGTH_LONG).show();
+                return;
+            }
+            ensureWhisperModelReadyAsync(false);
+        }
+        if (!isServiceRunning) {
+            Toast.makeText(this, "認識エンジン設定を保存しました", Toast.LENGTH_SHORT).show();
+            updateStatusFromPrefs();
+            return;
+        }
+
+        Intent intent = new Intent(this, VoiceListenerService.class);
+        intent.setAction(VoiceListenerService.ACTION_REFRESH_RECOGNIZER);
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            startForegroundService(intent);
+        } else {
+            startService(intent);
+        }
+        Toast.makeText(this, "認識エンジン切替を要求しました", Toast.LENGTH_SHORT).show();
+    }
+
+    private void refreshWhisperModelStatus() {
+        if (whisperModelStatusText == null) {
+            return;
+        }
+        if (whisperModelPreparationInProgress) {
+            whisperModelStatusText.setText("Whisperモデル: 内部ストレージへコピー中...");
+            return;
+        }
+
+        String assetName = WhisperModelAssetInstaller.getBundledModelAssetName(this);
+        File installedModel = WhisperModelAssetInstaller.getInstalledModelFile(this);
+        if (assetName == null) {
+            whisperModelStatusText.setText("Whisperモデル: assets/models/ に .gguf を配置してください");
+        } else if (installedModel != null) {
+            whisperModelStatusText.setText("Whisperモデル: " + installedModel.getName() + " (準備済み)");
+        } else {
+            whisperModelStatusText.setText("Whisperモデル: " + assetName + " (未コピー)");
+        }
+    }
+
+    private void ensureWhisperModelReadyAsync(boolean announceResult) {
+        if (backgroundExecutor == null || whisperModelPreparationInProgress || !WhisperModelAssetInstaller.hasBundledModel(this)) {
+            refreshWhisperModelStatus();
+            return;
+        }
+
+        whisperModelPreparationInProgress = true;
+        refreshWhisperModelStatus();
+        backgroundExecutor.execute(() -> {
+            File preparedModel = null;
+            Exception failure = null;
+            try {
+                preparedModel = WhisperModelAssetInstaller.ensureBundledModelCopied(this);
+            } catch (Exception e) {
+                failure = e;
+            }
+
+            File resultModel = preparedModel;
+            Exception resultFailure = failure;
+            runOnUiThread(() -> {
+                whisperModelPreparationInProgress = false;
+                refreshWhisperModelStatus();
+                if (announceResult) {
+                    if (resultFailure != null) {
+                        Toast.makeText(this, "Whisperモデル準備失敗: " + resultFailure.getMessage(), Toast.LENGTH_LONG).show();
+                    } else if (resultModel != null) {
+                        Toast.makeText(this, "Whisperモデルを準備しました: " + resultModel.getName(), Toast.LENGTH_SHORT).show();
+                    }
+                }
+            });
+        });
     }
 
     private void ensureOllamaExecutor() {
@@ -927,9 +1125,11 @@ public class MainActivity extends Activity {
         updateStatusFromPrefs();
         refreshModelSpinner(true);
         refreshOllamaModelSpinner(true);
+        syncRecognizerSettingsInputs();
         syncSummarySettingsInputs();
         updateDownloadProgressIndicator();
         updateVolumeIndicator();
+        refreshWhisperModelStatus();
         updateSummaryDisplay();
         // 定期更新を開始
         if (uiHandler == null) uiHandler = new Handler(Looper.getMainLooper());
@@ -980,6 +1180,10 @@ public class MainActivity extends Activity {
         if (ollamaExecutor != null) {
             ollamaExecutor.shutdownNow();
             ollamaExecutor = null;
+        }
+        if (backgroundExecutor != null) {
+            backgroundExecutor.shutdownNow();
+            backgroundExecutor = null;
         }
     }
 }

@@ -2,8 +2,6 @@ package com.micklab.voicelistener;
 
 import android.util.Log;
 import java.io.File;
-import java.nio.ByteBuffer;
-import java.nio.ByteOrder;
 import org.json.JSONException;
 import org.json.JSONObject;
 import org.vosk.Model;
@@ -15,6 +13,7 @@ public class VoskOfflineAsrEngine implements OfflineAsrEngine {
     private final String modelPath;
     private Model model;
     private Recognizer recognizer;
+    private byte[] reusableAudioBytes = new byte[0];
 
     public VoskOfflineAsrEngine(String modelPath) {
         this.modelPath = modelPath;
@@ -41,14 +40,14 @@ public class VoskOfflineAsrEngine implements OfflineAsrEngine {
     }
 
     @Override
-    public String transcribe(short[] pcm16, int sampleRateHz) {
+    public synchronized String transcribe(short[] pcm16, int sampleRateHz) {
         if (recognizer == null || pcm16 == null || pcm16.length == 0) {
             return null;
         }
 
         try {
             byte[] audioBytes = toLittleEndianBytes(pcm16);
-            recognizer.acceptWaveForm(audioBytes, audioBytes.length);
+            recognizer.acceptWaveForm(audioBytes, pcm16.length * 2);
             String resultJson = recognizer.getFinalResult();
             return parseText(resultJson);
         } catch (Exception e) {
@@ -75,11 +74,16 @@ public class VoskOfflineAsrEngine implements OfflineAsrEngine {
     }
 
     private byte[] toLittleEndianBytes(short[] pcm16) {
-        ByteBuffer buffer = ByteBuffer.allocate(pcm16.length * 2).order(ByteOrder.LITTLE_ENDIAN);
-        for (short sample : pcm16) {
-            buffer.putShort(sample);
+        int requiredSize = pcm16.length * 2;
+        if (reusableAudioBytes.length < requiredSize) {
+            reusableAudioBytes = new byte[requiredSize];
         }
-        return buffer.array();
+        int offset = 0;
+        for (short sample : pcm16) {
+            reusableAudioBytes[offset++] = (byte) (sample & 0xFF);
+            reusableAudioBytes[offset++] = (byte) ((sample >> 8) & 0xFF);
+        }
+        return reusableAudioBytes;
     }
 
     private String parseText(String resultJson) {

@@ -38,7 +38,7 @@ public class SummaryActivity extends Activity {
         root.setPadding(32, 32, 32, 32);
 
         summaryStatusText = new TextView(this);
-        summaryStatusText.setTextSize(15);
+        summaryStatusText.setTextSize(16);
         summaryStatusText.setPadding(0, 0, 0, 16);
         root.addView(summaryStatusText);
 
@@ -91,7 +91,7 @@ public class SummaryActivity extends Activity {
 
     private EditText createReadOnlyTextArea() {
         EditText output = new EditText(this);
-        output.setTextSize(12);
+        output.setTextSize(15);
         output.setBackgroundColor(0xFFF3F3F3);
         output.setTextColor(0xFF111111);
         output.setPadding(10, 10, 10, 10);

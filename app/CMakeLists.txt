@@ -15,7 +15,12 @@ set(WHISPER_BUILD_SERVER OFF CACHE BOOL "" FORCE)
 set(WHISPER_CURL OFF CACHE BOOL "" FORCE)
 set(WHISPER_SDL2 OFF CACHE BOOL "" FORCE)
 set(WHISPER_USE_SYSTEM_GGML OFF CACHE BOOL "" FORCE)
-set(GGML_NATIVE ON CACHE BOOL "" FORCE)
+if (ANDROID)
+    # Android builds are cross-compiled, so host-native tuning emits invalid flags like -mcpu=native.
+    set(GGML_NATIVE OFF CACHE BOOL "" FORCE)
+else()
+    set(GGML_NATIVE ON CACHE BOOL "" FORCE)
+endif()
 set(GGML_LTO ON CACHE BOOL "" FORCE)
 
 set(WHISPER_CPP_SOURCE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/whisper.cpp")

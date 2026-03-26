@@ -82,6 +82,7 @@ public class VoiceListenerService extends Service {
     public static final String ACTION_DELETE_MODEL = "com.micklab.voicelistener.action.DELETE_MODEL";
     public static final String ACTION_REFRESH_RECOGNIZER = "com.micklab.voicelistener.action.REFRESH_RECOGNIZER";
     public static final String ACTION_STOP_MONITORING = "com.micklab.voicelistener.action.STOP_MONITORING";
+    public static final String EXTRA_ENGINE_TYPE = "com.micklab.voicelistener.extra.ENGINE_TYPE";
     public static final String EXTRA_MODEL_URL = "com.micklab.voicelistener.extra.MODEL_URL";
     public static final String EXTRA_MODEL_NAME = "com.micklab.voicelistener.extra.MODEL_NAME";
     public static final String EXTRA_MODEL_REPLACE = "com.micklab.voicelistener.extra.MODEL_REPLACE";
@@ -153,37 +154,82 @@ public class VoiceListenerService extends Service {
         // intent がモデルインストール要求または停止要求を含む場合は先に処理する
         String action = intent != null ? intent.getAction() : null;
         if (ACTION_INSTALL_MODEL.equals(action)) {
-            String url = normalizeModelUrl(intent.getStringExtra(EXTRA_MODEL_URL));
-            File modelDir = getModelDirForUrl(url);
-            // 同一URLは常に削除して再ダウンロードする
-            installModelFromUrlAsync(modelDir, url, true, !isCapturing, true);
+            EngineType requestedEngineType = EngineType.fromPreference(intent != null ? intent.getStringExtra(EXTRA_ENGINE_TYPE) : null);
+            if (requestedEngineType == EngineType.WHISPER) {
+                installWhisperModelFromUrlAsync(
+                    intent != null ? intent.getStringExtra(EXTRA_MODEL_URL) : null,
+                    !isCapturing,
+                    true
+                );
+            } else {
+                String url = normalizeModelUrl(intent.getStringExtra(EXTRA_MODEL_URL));
+                File modelDir = getModelDirForUrl(url);
+                // 同一URLは常に削除して再ダウンロードする
+                installModelFromUrlAsync(modelDir, url, true, !isCapturing, true);
+            }
             // モデルインストールリクエスト時は音声認識はここで開始しない
         } else if (ACTION_SELECT_MODEL.equals(action)) {
-            String modelName = normalizeModelName(intent != null ? intent.getStringExtra(EXTRA_MODEL_NAME) : null);
-            if (modelName == null && intent != null) {
-                String legacyUrl = intent.getStringExtra(EXTRA_MODEL_URL);
-                if (legacyUrl != null && !legacyUrl.trim().isEmpty()) {
-                    modelName = getModelNameFromUrl(legacyUrl);
+            EngineType requestedEngineType = EngineType.fromPreference(intent != null ? intent.getStringExtra(EXTRA_ENGINE_TYPE) : null);
+            if (requestedEngineType == EngineType.WHISPER) {
+                String modelName = WhisperModelManager.normalizeModelName(intent != null ? intent.getStringExtra(EXTRA_MODEL_NAME) : null);
+                if (modelName == null && intent != null) {
+                    String modelUrl = intent.getStringExtra(EXTRA_MODEL_URL);
+                    if (modelUrl != null && !modelUrl.trim().isEmpty()) {
+                        try {
+                            modelName = WhisperModelManager.deriveModelNameFromUrl(modelUrl);
+                        } catch (IllegalArgumentException ignored) {
+                        }
+                    }
                 }
-            }
-            boolean switched = switchToModelName(modelName, true);
-            if (logManager != null) {
-                logManager.writeLog(switched ? ("モデル切替完了: " + modelName) : ("モデル切替失敗（未ダウンロード）: " + modelName), false);
+                boolean switched = switchToWhisperModelName(modelName, true);
+                if (logManager != null) {
+                    logManager.writeLog(switched ? ("Whisperモデル切替完了: " + modelName) : ("Whisperモデル切替失敗（未ダウンロード）: " + modelName), false);
+                }
+            } else {
+                String modelName = normalizeModelName(intent != null ? intent.getStringExtra(EXTRA_MODEL_NAME) : null);
+                if (modelName == null && intent != null) {
+                    String legacyUrl = intent.getStringExtra(EXTRA_MODEL_URL);
+                    if (legacyUrl != null && !legacyUrl.trim().isEmpty()) {
+                        modelName = getModelNameFromUrl(legacyUrl);
+                    }
+                }
+                boolean switched = switchToModelName(modelName, true);
+                if (logManager != null) {
+                    logManager.writeLog(switched ? ("モデル切替完了: " + modelName) : ("モデル切替失敗（未ダウンロード）: " + modelName), false);
+                }
             }
             if (!isCapturing) {
                 stopSelf();
             }
         } else if (ACTION_DELETE_MODEL.equals(action)) {
-            String modelName = normalizeModelName(intent != null ? intent.getStringExtra(EXTRA_MODEL_NAME) : null);
-            if (modelName == null && intent != null) {
-                String legacyUrl = intent.getStringExtra(EXTRA_MODEL_URL);
-                if (legacyUrl != null && !legacyUrl.trim().isEmpty()) {
-                    modelName = getModelNameFromUrl(legacyUrl);
+            EngineType requestedEngineType = EngineType.fromPreference(intent != null ? intent.getStringExtra(EXTRA_ENGINE_TYPE) : null);
+            if (requestedEngineType == EngineType.WHISPER) {
+                String modelName = WhisperModelManager.normalizeModelName(intent != null ? intent.getStringExtra(EXTRA_MODEL_NAME) : null);
+                if (modelName == null && intent != null) {
+                    String modelUrl = intent.getStringExtra(EXTRA_MODEL_URL);
+                    if (modelUrl != null && !modelUrl.trim().isEmpty()) {
+                        try {
+                            modelName = WhisperModelManager.deriveModelNameFromUrl(modelUrl);
+                        } catch (IllegalArgumentException ignored) {
+                        }
+                    }
                 }
-            }
-            boolean deleted = deleteModelByName(modelName);
-            if (logManager != null) {
-                logManager.writeLog(deleted ? ("モデル削除完了: " + modelName) : ("モデル削除対象なし: " + modelName), false);
+                boolean deleted = deleteWhisperModelByName(modelName);
+                if (logManager != null) {
+                    logManager.writeLog(deleted ? ("Whisperモデル削除完了: " + modelName) : ("Whisperモデル削除対象なし: " + modelName), false);
+                }
+            } else {
+                String modelName = normalizeModelName(intent != null ? intent.getStringExtra(EXTRA_MODEL_NAME) : null);
+                if (modelName == null && intent != null) {
+                    String legacyUrl = intent.getStringExtra(EXTRA_MODEL_URL);
+                    if (legacyUrl != null && !legacyUrl.trim().isEmpty()) {
+                        modelName = getModelNameFromUrl(legacyUrl);
+                    }
+                }
+                boolean deleted = deleteModelByName(modelName);
+                if (logManager != null) {
+                    logManager.writeLog(deleted ? ("モデル削除完了: " + modelName) : ("モデル削除対象なし: " + modelName), false);
+                }
             }
             if (!isCapturing) {
                 stopSelf();
@@ -426,28 +472,38 @@ public class VoiceListenerService extends Service {
 
     private boolean initializeWhisperEngine() {
         try {
-            File modelFile = WhisperModelAssetInstaller.ensureBundledModelCopied(this);
+            File modelFile = WhisperModelManager.resolvePreferredDownloadedModelFile(this);
+            if (!WhisperModelManager.hasModelContent(modelFile)) {
+                modelFile = WhisperModelAssetInstaller.ensureBundledModelCopied(this);
+            }
             if (modelFile == null || !modelFile.exists()) {
-                try { if (logManager != null) logManager.writeLog("Whisperモデルが見つかりません: assets/models/*.gguf", false); } catch (Exception ignored) {}
+                try { if (logManager != null) logManager.writeLog("Whisperモデルが見つかりません: ダウンロード済みモデルまたは assets/models/*.gguf を確認してください", false); } catch (Exception ignored) {}
                 return false;
             }
-            SpeechRecognizerConfig config = new SpeechRecognizerConfig(
-                EngineType.WHISPER,
-                modelFile.getAbsolutePath(),
-                SAMPLE_RATE_HZ,
-                "ja",
-                SpeechRecognizerConfig.defaultThreadCount()
-            );
-            if (!configureSpeechRecognizer(config)) {
-                return false;
-            }
-            Log.i(TAG, "ASR engine: " + config.getEngineType().getDisplayName() + " @ " + modelFile.getAbsolutePath());
-            return true;
+            return initializeWhisperEngineWithModel(modelFile);
         } catch (Exception e) {
             Log.e(TAG, "Failed to prepare Whisper model", e);
             try { if (logManager != null) logManager.writeLog("Whisperモデル準備失敗: " + e.getMessage(), false); } catch (Exception ignored) {}
             return false;
         }
+    }
+
+    private boolean initializeWhisperEngineWithModel(File modelFile) {
+        if (!WhisperModelManager.hasModelContent(modelFile)) {
+            return false;
+        }
+        SpeechRecognizerConfig config = new SpeechRecognizerConfig(
+            EngineType.WHISPER,
+            modelFile.getAbsolutePath(),
+            SAMPLE_RATE_HZ,
+            "ja",
+            SpeechRecognizerConfig.defaultThreadCount()
+        );
+        if (!configureSpeechRecognizer(config)) {
+            return false;
+        }
+        Log.i(TAG, "ASR engine: " + config.getEngineType().getDisplayName() + " @ " + modelFile.getAbsolutePath());
+        return true;
     }
 
     private boolean configureSpeechRecognizer(SpeechRecognizerConfig config) {
@@ -567,6 +623,120 @@ public class VoiceListenerService extends Service {
                 Log.e(TAG, "モデル取得例外", e);
             } finally {
                 try { updateDownloadProgress(false, finalProgress, modelName); } catch (Exception ignored) {}
+                if (stopServiceOnFinish) {
+                    try { stopSelf(); } catch (Exception ignored) {}
+                }
+            }
+        });
+    }
+
+    private void installWhisperModelFromUrlAsync(String url, boolean stopServiceOnFinish, boolean activateAfterInstall) {
+        final String normalizedUrl = WhisperModelManager.normalizeModelUrl(url);
+        final String modelName;
+        final File modelFile;
+        try {
+            modelName = WhisperModelManager.deriveModelNameFromUrl(normalizedUrl);
+            modelFile = WhisperModelManager.getModelFileForName(this, modelName);
+        } catch (IllegalArgumentException e) {
+            try { if (logManager != null) logManager.writeLog("WhisperモデルURLが不正です: " + e.getMessage(), false); } catch (Exception ignored) {}
+            if (stopServiceOnFinish) {
+                stopSelf();
+            }
+            return;
+        }
+        if (modelFile == null) {
+            try { if (logManager != null) logManager.writeLog("Whisperモデル保存先を解決できません", false); } catch (Exception ignored) {}
+            if (stopServiceOnFinish) {
+                stopSelf();
+            }
+            return;
+        }
+        if (modelInstallerExecutor == null) {
+            modelInstallerExecutor = Executors.newSingleThreadExecutor();
+        }
+        modelInstallerExecutor.execute(() -> {
+            int finalProgress = 0;
+            File temporaryFile = null;
+            try {
+                updateWhisperDownloadProgress(true, 0, modelName);
+                if (logManager != null) {
+                    logManager.writeLog("Whisperモデル取得開始: " + normalizedUrl);
+                }
+                File modelsRoot = WhisperModelManager.getModelsRootDir(this);
+                if (!modelsRoot.exists() && !modelsRoot.mkdirs()) {
+                    if (logManager != null) {
+                        logManager.writeLog("Whisperモデルフォルダ作成失敗: " + modelsRoot.getAbsolutePath());
+                    }
+                    return;
+                }
+
+                temporaryFile = new File(modelsRoot, modelName + ".download");
+                if (temporaryFile.exists()) {
+                    deleteRecursively(temporaryFile);
+                }
+
+                boolean downloadOk = downloadFile(
+                    normalizedUrl,
+                    temporaryFile,
+                    modelName,
+                    WhisperModelManager.PREF_MODEL_DOWNLOAD_ACTIVE,
+                    WhisperModelManager.PREF_MODEL_DOWNLOAD_PROGRESS,
+                    WhisperModelManager.PREF_MODEL_DOWNLOAD_NAME
+                );
+                if (!downloadOk || !WhisperModelManager.hasModelContent(temporaryFile)) {
+                    if (logManager != null) {
+                        logManager.writeLog("Whisperモデルダウンロード失敗");
+                    }
+                    return;
+                }
+
+                if (modelFile.exists()) {
+                    deleteRecursively(modelFile);
+                }
+
+                boolean moveOk = temporaryFile.renameTo(modelFile);
+                if (!moveOk && !copyDirectory(temporaryFile, modelFile)) {
+                    if (logManager != null) {
+                        logManager.writeLog("Whisperモデル保存失敗");
+                    }
+                    return;
+                }
+                if (!WhisperModelManager.hasModelContent(modelFile)) {
+                    if (logManager != null) {
+                        logManager.writeLog("Whisperモデル検証失敗");
+                    }
+                    return;
+                }
+
+                if (logManager != null) {
+                    logManager.writeLog("Whisperモデル取得完了: " + modelFile.getAbsolutePath());
+                }
+                finalProgress = 100;
+
+                if (activateAfterInstall) {
+                    WhisperModelManager.setSelectedModelName(this, modelName);
+                }
+
+                if (activateAfterInstall && SpeechRecognitionPreferences.getActiveEngine(this) == EngineType.WHISPER) {
+                    if (switchToWhisperModelName(modelName, false)) {
+                        if (logManager != null) {
+                            logManager.writeLog("Whisper ASRエンジン初期化成功");
+                        }
+                    } else if (logManager != null) {
+                        logManager.writeLog("Whisper ASRエンジン初期化失敗");
+                    }
+                }
+            } catch (Exception e) {
+                try { if (logManager != null) logManager.writeLog("Whisperモデル取得中に例外発生: " + e.getMessage()); } catch (Exception ignored) {}
+                Log.e(TAG, "Whisperモデル取得例外", e);
+            } finally {
+                try {
+                    if (temporaryFile != null && temporaryFile.exists()) {
+                        deleteRecursively(temporaryFile);
+                    }
+                } catch (Exception ignored) {
+                }
+                try { updateWhisperDownloadProgress(false, finalProgress, modelName); } catch (Exception ignored) {}
                 if (stopServiceOnFinish) {
                     try { stopSelf(); } catch (Exception ignored) {}
                 }
@@ -705,6 +875,21 @@ public class VoiceListenerService extends Service {
         return initializeVoskEngineWithModel(modelDir);
     }
 
+    private boolean switchToWhisperModelName(String modelName, boolean persistSelection) {
+        String normalizedModelName = WhisperModelManager.normalizeModelName(modelName);
+        File modelFile = WhisperModelManager.getModelFileForName(this, normalizedModelName);
+        if (!WhisperModelManager.hasModelContent(modelFile)) {
+            return false;
+        }
+        if (persistSelection) {
+            WhisperModelManager.setSelectedModelName(this, normalizedModelName);
+        }
+        if (SpeechRecognitionPreferences.getActiveEngine(this) != EngineType.WHISPER) {
+            return true;
+        }
+        return initializeWhisperEngineWithModel(modelFile);
+    }
+
     private boolean deleteModelByName(String modelName) {
         String normalizedModelName = normalizeModelName(modelName);
         File modelDir = getModelDirForName(normalizedModelName);
@@ -724,6 +909,27 @@ public class VoiceListenerService extends Service {
                 if (SpeechRecognitionPreferences.getActiveEngine(this) == EngineType.VOSK) {
                     initializeAsrEngine();
                 }
+            }
+        }
+        return deleted;
+    }
+
+    private boolean deleteWhisperModelByName(String modelName) {
+        String normalizedModelName = WhisperModelManager.normalizeModelName(modelName);
+        File modelFile = WhisperModelManager.getModelFileForName(this, normalizedModelName);
+        if (modelFile == null || !modelFile.exists()) {
+            return false;
+        }
+
+        deleteRecursively(modelFile);
+        boolean deleted = !modelFile.exists();
+        if (deleted) {
+            String activeModelName = WhisperModelManager.getSelectedModelName(this);
+            if (normalizedModelName != null && normalizedModelName.equals(activeModelName)) {
+                WhisperModelManager.setSelectedModelName(this, null);
+            }
+            if (SpeechRecognitionPreferences.getActiveEngine(this) == EngineType.WHISPER) {
+                initializeAsrEngine();
             }
         }
         return deleted;
@@ -928,6 +1134,17 @@ public class VoiceListenerService extends Service {
     }
 
     private boolean downloadFile(String urlStr, File destination, String modelName) {
+        return downloadFile(
+            urlStr,
+            destination,
+            modelName,
+            PREF_MODEL_DOWNLOAD_ACTIVE,
+            PREF_MODEL_DOWNLOAD_PROGRESS,
+            PREF_MODEL_DOWNLOAD_NAME
+        );
+    }
+
+    private boolean downloadFile(String urlStr, File destination, String modelName, String activeKey, String progressKey, String nameKey) {
         InputStream in = null;
         OutputStream out = null;
         HttpURLConnection conn = null;
@@ -957,11 +1174,11 @@ public class VoiceListenerService extends Service {
                     int progress = (int) Math.min(100L, (downloaded * 100L) / contentLength);
                     if (progress != lastProgress) {
                         lastProgress = progress;
-                        updateDownloadProgress(true, progress, modelName);
+                        updateDownloadProgress(true, progress, modelName, activeKey, progressKey, nameKey);
                     }
                 } else if (lastProgress != -1) {
                     lastProgress = -1;
-                    updateDownloadProgress(true, -1, modelName);
+                    updateDownloadProgress(true, -1, modelName, activeKey, progressKey, nameKey);
                 }
             }
             out.flush();
@@ -977,11 +1194,33 @@ public class VoiceListenerService extends Service {
     }
 
     private void updateDownloadProgress(boolean active, int progress, String modelName) {
+        updateDownloadProgress(
+            active,
+            progress,
+            modelName,
+            PREF_MODEL_DOWNLOAD_ACTIVE,
+            PREF_MODEL_DOWNLOAD_PROGRESS,
+            PREF_MODEL_DOWNLOAD_NAME
+        );
+    }
+
+    private void updateWhisperDownloadProgress(boolean active, int progress, String modelName) {
+        updateDownloadProgress(
+            active,
+            progress,
+            modelName,
+            WhisperModelManager.PREF_MODEL_DOWNLOAD_ACTIVE,
+            WhisperModelManager.PREF_MODEL_DOWNLOAD_PROGRESS,
+            WhisperModelManager.PREF_MODEL_DOWNLOAD_NAME
+        );
+    }
+
+    private void updateDownloadProgress(boolean active, int progress, String modelName, String activeKey, String progressKey, String nameKey) {
         if (sharedPrefs == null) return;
         sharedPrefs.edit()
-            .putBoolean(PREF_MODEL_DOWNLOAD_ACTIVE, active)
-            .putInt(PREF_MODEL_DOWNLOAD_PROGRESS, progress)
-            .putString(PREF_MODEL_DOWNLOAD_NAME, modelName)
+            .putBoolean(activeKey, active)
+            .putInt(progressKey, progress)
+            .putString(nameKey, modelName)
             .apply();
     }
 

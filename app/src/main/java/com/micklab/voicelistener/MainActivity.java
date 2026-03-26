@@ -78,16 +78,23 @@ public class MainActivity extends Activity {
 
     private Spinner modelSpinner;
     private ArrayAdapter<String> modelSpinnerAdapter;
+    private Spinner whisperModelSpinner;
+    private ArrayAdapter<String> whisperModelSpinnerAdapter;
     private Spinner engineSpinner;
     private ArrayAdapter<String> engineSpinnerAdapter;
     private TextView recognizerStatusText;
     private TextView whisperModelStatusText;
     private ProgressBar modelDownloadProgressBar;
     private TextView modelDownloadProgressText;
+    private ProgressBar whisperModelDownloadProgressBar;
+    private TextView whisperModelDownloadProgressText;
     private SeekBar volumeIndicatorSeekBar;
     private TextView volumeIndicatorLabel;
     private LinearLayout voskModelSection;
+    private LinearLayout whisperModelSection;
+    private EditText whisperModelUrlInput;
     private boolean wasModelDownloadActive = false;
+    private boolean wasWhisperModelDownloadActive = false;
     private EditText ollamaBaseUrlInput;
     private Spinner ollamaModelSpinner;
     private ArrayAdapter<String> ollamaModelSpinnerAdapter;
@@ -165,9 +172,112 @@ public class MainActivity extends Activity {
         applyEngineButton.setOnClickListener(v -> applyRecognizerSelection());
         layout.addView(applyEngineButton);
 
+        whisperModelSection = new LinearLayout(this);
+        whisperModelSection.setOrientation(LinearLayout.VERTICAL);
+        layout.addView(whisperModelSection);
+
+        TextView whisperSectionLabel = new TextView(this);
+        whisperSectionLabel.setText("Whisper モデル");
+        whisperSectionLabel.setTextSize(16);
+        whisperSectionLabel.setPadding(0, 18, 0, 8);
+        whisperModelSection.addView(whisperSectionLabel);
+
+        whisperModelUrlInput = new EditText(this);
+        whisperModelUrlInput.setHint("Whisper .gguf のURLを入力 (例: https://...)");
+        whisperModelUrlInput.setText(WhisperModelManager.DEFAULT_MODEL_URL);
+        whisperModelSection.addView(whisperModelUrlInput);
+
+        Button replaceWhisperModelButton = new Button(this);
+        replaceWhisperModelButton.setText("Whisperモデルロード/再DL");
+        replaceWhisperModelButton.setOnClickListener(v -> {
+            String url = whisperModelUrlInput.getText().toString().trim();
+            try {
+                WhisperModelManager.deriveModelNameFromUrl(url);
+            } catch (IllegalArgumentException e) {
+                Toast.makeText(this, "WhisperモデルURLが不正です: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                return;
+            }
+            Intent intent = new Intent(this, VoiceListenerService.class);
+            intent.setAction(VoiceListenerService.ACTION_INSTALL_MODEL);
+            intent.putExtra(VoiceListenerService.EXTRA_ENGINE_TYPE, EngineType.WHISPER.name());
+            intent.putExtra(VoiceListenerService.EXTRA_MODEL_URL, url);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent);
+            } else {
+                startService(intent);
+            }
+            Toast.makeText(this, "Whisperモデルロードを開始しました", Toast.LENGTH_SHORT).show();
+        });
+        whisperModelSection.addView(replaceWhisperModelButton);
+
+        whisperModelDownloadProgressText = new TextView(this);
+        whisperModelDownloadProgressText.setText("WhisperモデルDL進捗: 待機中");
+        whisperModelDownloadProgressText.setPadding(0, 6, 0, 6);
+        whisperModelSection.addView(whisperModelDownloadProgressText);
+
+        whisperModelDownloadProgressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
+        whisperModelDownloadProgressBar.setMax(100);
+        whisperModelDownloadProgressBar.setProgress(0);
+        whisperModelSection.addView(whisperModelDownloadProgressBar);
+
+        TextView whisperModelSelectLabel = new TextView(this);
+        whisperModelSelectLabel.setText("ダウンロード済みWhisperモデル:");
+        whisperModelSelectLabel.setPadding(0, 14, 0, 6);
+        whisperModelSection.addView(whisperModelSelectLabel);
+
+        whisperModelSpinner = new Spinner(this);
+        whisperModelSpinnerAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, new ArrayList<>());
+        whisperModelSpinnerAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        whisperModelSpinner.setAdapter(whisperModelSpinnerAdapter);
+        whisperModelSection.addView(whisperModelSpinner);
+
+        Button switchWhisperModelButton = new Button(this);
+        switchWhisperModelButton.setText("選択Whisperモデルへ切替");
+        switchWhisperModelButton.setOnClickListener(v -> {
+            String modelName = getSelectedWhisperModelName();
+            if (modelName == null) {
+                Toast.makeText(this, "切替対象のWhisperモデルがありません", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Intent intent = new Intent(this, VoiceListenerService.class);
+            intent.setAction(VoiceListenerService.ACTION_SELECT_MODEL);
+            intent.putExtra(VoiceListenerService.EXTRA_ENGINE_TYPE, EngineType.WHISPER.name());
+            intent.putExtra(VoiceListenerService.EXTRA_MODEL_NAME, modelName);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent);
+            } else {
+                startService(intent);
+            }
+            Toast.makeText(this, "Whisperモデル切替を要求しました: " + modelName, Toast.LENGTH_SHORT).show();
+        });
+        whisperModelSection.addView(switchWhisperModelButton);
+
+        Button deleteWhisperModelButton = new Button(this);
+        deleteWhisperModelButton.setText("選択Whisperモデル削除");
+        deleteWhisperModelButton.setOnClickListener(v -> {
+            String modelName = getSelectedWhisperModelName();
+            if (modelName == null) {
+                Toast.makeText(this, "削除対象のWhisperモデルがありません", Toast.LENGTH_SHORT).show();
+                return;
+            }
+            Intent intent = new Intent(this, VoiceListenerService.class);
+            intent.setAction(VoiceListenerService.ACTION_DELETE_MODEL);
+            intent.putExtra(VoiceListenerService.EXTRA_ENGINE_TYPE, EngineType.WHISPER.name());
+            intent.putExtra(VoiceListenerService.EXTRA_MODEL_NAME, modelName);
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                startForegroundService(intent);
+            } else {
+                startService(intent);
+            }
+            Toast.makeText(this, "Whisperモデル削除を要求しました: " + modelName, Toast.LENGTH_SHORT).show();
+            if (uiHandler == null) uiHandler = new Handler(Looper.getMainLooper());
+            uiHandler.postDelayed(() -> refreshWhisperModelSpinner(true), 500);
+        });
+        whisperModelSection.addView(deleteWhisperModelButton);
+
         whisperModelStatusText = new TextView(this);
         whisperModelStatusText.setPadding(0, 4, 0, 12);
-        layout.addView(whisperModelStatusText);
+        whisperModelSection.addView(whisperModelStatusText);
          
         // VAD閾値スライダー + 音量インジケータ（同縮尺）
         float savedThreshold = prefs.getFloat("rms_threshold", 900.0f);
@@ -269,6 +379,7 @@ public class MainActivity extends Activity {
             }
             Intent intent = new Intent(this, VoiceListenerService.class);
             intent.setAction(VoiceListenerService.ACTION_INSTALL_MODEL);
+            intent.putExtra(VoiceListenerService.EXTRA_ENGINE_TYPE, EngineType.VOSK.name());
             intent.putExtra(VoiceListenerService.EXTRA_MODEL_URL, url);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent);
@@ -311,6 +422,7 @@ public class MainActivity extends Activity {
             }
             Intent intent = new Intent(this, VoiceListenerService.class);
             intent.setAction(VoiceListenerService.ACTION_SELECT_MODEL);
+            intent.putExtra(VoiceListenerService.EXTRA_ENGINE_TYPE, EngineType.VOSK.name());
             intent.putExtra(VoiceListenerService.EXTRA_MODEL_NAME, modelName);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent);
@@ -332,6 +444,7 @@ public class MainActivity extends Activity {
             }
             Intent intent = new Intent(this, VoiceListenerService.class);
             intent.setAction(VoiceListenerService.ACTION_DELETE_MODEL);
+            intent.putExtra(VoiceListenerService.EXTRA_ENGINE_TYPE, EngineType.VOSK.name());
             intent.putExtra(VoiceListenerService.EXTRA_MODEL_NAME, modelName);
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 startForegroundService(intent);
@@ -453,9 +566,11 @@ public class MainActivity extends Activity {
         layout.addView(logContentText);
 
         refreshModelSpinner(false);
+        refreshWhisperModelSpinner(false);
         refreshOllamaModelSpinner(false);
         syncRecognizerSettingsInputs();
         updateDownloadProgressIndicator();
+        updateWhisperDownloadProgressIndicator();
         updateVolumeIndicator();
         updateSummaryDisplay();
         refreshWhisperModelStatus();
@@ -605,8 +720,8 @@ public class MainActivity extends Activity {
         }
 
         saveRecognizerSettingsFromInputs();
-        if (getSelectedEngineType() == EngineType.WHISPER && !WhisperModelAssetInstaller.hasBundledModel(this)) {
-            String msg = "Whisperモデルが未配置です。assets/models/ に .gguf を追加してください。";
+        if (getSelectedEngineType() == EngineType.WHISPER && !WhisperModelManager.hasAnyModelSource(this)) {
+            String msg = "Whisperモデルが未準備です。URLから .gguf をダウンロードするか、assets/models/ に .gguf を追加してください。";
             logManager.writeLog(msg);
             statusText.setText("ステータス: " + msg);
             Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
@@ -700,6 +815,14 @@ public class MainActivity extends Activity {
         return selected.isEmpty() ? null : selected;
     }
 
+    private String getSelectedWhisperModelName() {
+        if (whisperModelSpinner == null || whisperModelSpinner.getSelectedItem() == null) {
+            return null;
+        }
+        String selected = String.valueOf(whisperModelSpinner.getSelectedItem()).trim();
+        return selected.isEmpty() ? null : selected;
+    }
+
     private String getSelectedOllamaModelName() {
         if (ollamaModelSpinner == null || ollamaModelSpinner.getSelectedItem() == null) {
             return null;
@@ -734,6 +857,24 @@ public class MainActivity extends Activity {
         if (!modelNames.isEmpty()) {
             int index = selectedBefore != null ? modelNames.indexOf(selectedBefore) : -1;
             modelSpinner.setSelection(index >= 0 ? index : 0);
+        }
+    }
+
+    private void refreshWhisperModelSpinner(boolean keepSelection) {
+        if (whisperModelSpinnerAdapter == null || whisperModelSpinner == null) return;
+
+        String selectedBefore = keepSelection ? getSelectedWhisperModelName() : null;
+        String savedModel = WhisperModelManager.getSelectedModelName(this);
+        ArrayList<String> modelNames = new ArrayList<>(WhisperModelManager.listDownloadedModelNames(this));
+
+        whisperModelSpinnerAdapter.clear();
+        whisperModelSpinnerAdapter.addAll(modelNames);
+        whisperModelSpinnerAdapter.notifyDataSetChanged();
+
+        if (!modelNames.isEmpty()) {
+            String target = selectedBefore != null ? selectedBefore : savedModel;
+            int index = target != null ? modelNames.indexOf(target) : -1;
+            whisperModelSpinner.setSelection(index >= 0 ? index : 0);
         }
     }
 
@@ -827,8 +968,8 @@ public class MainActivity extends Activity {
         if (voskModelSection != null) {
             voskModelSection.setVisibility(whisperSelected ? View.GONE : View.VISIBLE);
         }
-        if (whisperModelStatusText != null) {
-            whisperModelStatusText.setVisibility(whisperSelected ? View.VISIBLE : View.GONE);
+        if (whisperModelSection != null) {
+            whisperModelSection.setVisibility(whisperSelected ? View.VISIBLE : View.GONE);
         }
         refreshWhisperModelStatus();
     }
@@ -837,8 +978,8 @@ public class MainActivity extends Activity {
         saveRecognizerSettingsFromInputs();
         updateRecognizerUiState();
         if (getSelectedEngineType() == EngineType.WHISPER) {
-            if (!WhisperModelAssetInstaller.hasBundledModel(this)) {
-                Toast.makeText(this, "Whisperモデルが未配置です。assets/models/ に .gguf を追加してください。", Toast.LENGTH_LONG).show();
+            if (!WhisperModelManager.hasAnyModelSource(this)) {
+                Toast.makeText(this, "Whisperモデルが未準備です。URLから .gguf を取得するか、assets/models/ に .gguf を追加してください。", Toast.LENGTH_LONG).show();
                 return;
             }
             ensureWhisperModelReadyAsync(false);
@@ -868,19 +1009,42 @@ public class MainActivity extends Activity {
             return;
         }
 
+        String selectedModelName = WhisperModelManager.getSelectedModelName(this);
+        File selectedModel = WhisperModelManager.resolveSelectedDownloadedModelFile(this);
+        if (selectedModel != null) {
+            whisperModelStatusText.setText("Whisperモデル: " + selectedModel.getName() + " (ダウンロード済み / 選択中)");
+            return;
+        }
+
+        File preferredDownloadedModel = WhisperModelManager.resolvePreferredDownloadedModelFile(this);
+        if (preferredDownloadedModel != null) {
+            if (selectedModelName != null) {
+                whisperModelStatusText.setText("Whisperモデル: " + selectedModelName + " は見つかりません。代わりに " + preferredDownloadedModel.getName() + " を利用可能です");
+            } else {
+                whisperModelStatusText.setText("Whisperモデル: " + preferredDownloadedModel.getName() + " (ダウンロード済み)");
+            }
+            return;
+        }
+
         String assetName = WhisperModelAssetInstaller.getBundledModelAssetName(this);
         File installedModel = WhisperModelAssetInstaller.getInstalledModelFile(this);
-        if (assetName == null) {
-            whisperModelStatusText.setText("Whisperモデル: assets/models/ に .gguf を配置してください");
-        } else if (installedModel != null) {
-            whisperModelStatusText.setText("Whisperモデル: " + installedModel.getName() + " (準備済み)");
+        if (installedModel != null) {
+            whisperModelStatusText.setText("Whisperモデル: " + installedModel.getName() + " (assets/models 由来 / 準備済み)");
+        } else if (assetName != null) {
+            whisperModelStatusText.setText("Whisperモデル: " + assetName + " (assets/models 由来 / 未コピー)");
         } else {
-            whisperModelStatusText.setText("Whisperモデル: " + assetName + " (未コピー)");
+            whisperModelStatusText.setText("Whisperモデル: 未ダウンロード。URLから .gguf を取得してください");
         }
     }
 
     private void ensureWhisperModelReadyAsync(boolean announceResult) {
-        if (backgroundExecutor == null || whisperModelPreparationInProgress || !WhisperModelAssetInstaller.hasBundledModel(this)) {
+        if (backgroundExecutor == null || whisperModelPreparationInProgress) {
+            refreshWhisperModelStatus();
+            return;
+        }
+        if (WhisperModelManager.resolvePreferredDownloadedModelFile(this) != null
+            || WhisperModelAssetInstaller.getInstalledModelFile(this) != null
+            || !WhisperModelAssetInstaller.hasBundledModel(this)) {
             refreshWhisperModelStatus();
             return;
         }
@@ -910,6 +1074,39 @@ public class MainActivity extends Activity {
                 }
             });
         });
+    }
+
+    private void updateWhisperDownloadProgressIndicator() {
+        if (whisperModelDownloadProgressBar == null || whisperModelDownloadProgressText == null) return;
+        boolean active = prefs.getBoolean(WhisperModelManager.PREF_MODEL_DOWNLOAD_ACTIVE, false);
+        int progress = prefs.getInt(WhisperModelManager.PREF_MODEL_DOWNLOAD_PROGRESS, 0);
+        String modelName = prefs.getString(WhisperModelManager.PREF_MODEL_DOWNLOAD_NAME, "");
+
+        if (active) {
+            if (progress < 0) {
+                whisperModelDownloadProgressBar.setIndeterminate(true);
+                whisperModelDownloadProgressText.setText("WhisperモデルDL中: " + modelName);
+            } else {
+                int safeProgress = Math.max(0, Math.min(progress, 100));
+                whisperModelDownloadProgressBar.setIndeterminate(false);
+                whisperModelDownloadProgressBar.setProgress(safeProgress);
+                whisperModelDownloadProgressText.setText("WhisperモデルDL中 (" + modelName + "): " + safeProgress + "%");
+            }
+        } else {
+            int safeProgress = Math.max(0, Math.min(progress, 100));
+            whisperModelDownloadProgressBar.setIndeterminate(false);
+            whisperModelDownloadProgressBar.setProgress(safeProgress);
+            if (safeProgress >= 100 && modelName != null && !modelName.isEmpty()) {
+                whisperModelDownloadProgressText.setText("WhisperモデルDL完了: " + modelName);
+            } else {
+                whisperModelDownloadProgressText.setText("WhisperモデルDL進捗: 待機中");
+            }
+        }
+        if (wasWhisperModelDownloadActive && !active) {
+            refreshWhisperModelSpinner(true);
+            refreshWhisperModelStatus();
+        }
+        wasWhisperModelDownloadActive = active;
     }
 
     private void ensureOllamaExecutor() {
@@ -1124,10 +1321,12 @@ public class MainActivity extends Activity {
         updateLogDisplay();
         updateStatusFromPrefs();
         refreshModelSpinner(true);
+        refreshWhisperModelSpinner(true);
         refreshOllamaModelSpinner(true);
         syncRecognizerSettingsInputs();
         syncSummarySettingsInputs();
         updateDownloadProgressIndicator();
+        updateWhisperDownloadProgressIndicator();
         updateVolumeIndicator();
         refreshWhisperModelStatus();
         updateSummaryDisplay();
@@ -1152,6 +1351,7 @@ public class MainActivity extends Activity {
                 public void run() {
                     try {
                         updateDownloadProgressIndicator();
+                        updateWhisperDownloadProgressIndicator();
                         updateVolumeIndicator();
                     } catch (Exception ignored) {}
                     uiHandler.postDelayed(this, INDICATOR_UPDATE_INTERVAL_MS);

@@ -55,8 +55,13 @@ public class VoiceListenerService extends Service {
     private static final int CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO;
     private static final int AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT;
     private static final int FRAME_SAMPLES = 1024;
-    private static final int MAX_SILENCE_FRAMES = 15;
-    private static final int MIN_SPEECH_FRAMES = 8;
+    private static final int VOSK_MAX_SILENCE_FRAMES = 15;
+    private static final int VOSK_MIN_SPEECH_FRAMES = 8;
+    private static final int VOSK_MAX_CONTINUOUS_SPEECH_FRAMES = 64;
+    private static final int WHISPER_MAX_SILENCE_FRAMES = 6;
+    private static final int WHISPER_MIN_SPEECH_FRAMES = 4;
+    private static final int WHISPER_MAX_CONTINUOUS_SPEECH_FRAMES = 20;
+    private static final int WHISPER_MAX_RETRY_AUDIO_SAMPLES = SAMPLE_RATE_HZ * 12;
     private static final double RMS_THRESHOLD = 900.0;
     private static final long SUMMARY_DEBOUNCE_MS = 4000L;
 
@@ -96,6 +101,8 @@ public class VoiceListenerService extends Service {
     private SharedPreferences sharedPrefs;
     private SharedPreferences.OnSharedPreferenceChangeListener prefsListener;
     private final OllamaClient ollamaClient = new OllamaClient();
+    private final WhisperRecognitionBuffer whisperRecognitionBuffer =
+        new WhisperRecognitionBuffer(WHISPER_MAX_RETRY_AUDIO_SAMPLES);
 
     private AudioRecord audioRecord;
     private NoiseSuppressor noiseSuppressor;
@@ -119,7 +126,7 @@ public class VoiceListenerService extends Service {
         // VAD閾値は SharedPreferences から取得して初期化する
         sharedPrefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         float prefThreshold = sharedPrefs.getFloat(PREF_RMS_THRESHOLD, (float) RMS_THRESHOLD);
-        vad = new VoiceActivityDetector(prefThreshold, MAX_SILENCE_FRAMES, MIN_SPEECH_FRAMES);
+        vad = createVoiceActivityDetector(SpeechRecognitionPreferences.getActiveEngine(this), prefThreshold);
 
         prefsListener = new SharedPreferences.OnSharedPreferenceChangeListener() {
             @Override
@@ -319,6 +326,7 @@ public class VoiceListenerService extends Service {
             speechRecognizerFacade.release();
             speechRecognizerFacade = null;
         }
+        whisperRecognitionBuffer.reset();
         if (modelInstallerExecutor != null) {
             modelInstallerExecutor.shutdownNow();
             modelInstallerExecutor = null;
@@ -435,6 +443,8 @@ public class VoiceListenerService extends Service {
 
     private void initializeAsrEngine() {
         EngineType activeEngineType = SpeechRecognitionPreferences.getActiveEngine(this);
+        whisperRecognitionBuffer.reset();
+        rebuildVoiceActivityDetector(activeEngineType);
         boolean initialized = activeEngineType == EngineType.WHISPER
             ? initializeWhisperEngine()
             : initializeVoskEngineWithModel(resolvePreferredModelDir());
@@ -446,6 +456,30 @@ public class VoiceListenerService extends Service {
             speechRecognizerFacade.setFallbackToNoOp();
         }
         Log.w(TAG, "ASR engine fallback: NoOp (" + activeEngineType.getDisplayName() + ")");
+    }
+
+    private VoiceActivityDetector createVoiceActivityDetector(EngineType engineType, double rmsThreshold) {
+        if (engineType == EngineType.WHISPER) {
+            return new VoiceActivityDetector(
+                rmsThreshold,
+                WHISPER_MAX_SILENCE_FRAMES,
+                WHISPER_MIN_SPEECH_FRAMES,
+                WHISPER_MAX_CONTINUOUS_SPEECH_FRAMES
+            );
+        }
+        return new VoiceActivityDetector(
+            rmsThreshold,
+            VOSK_MAX_SILENCE_FRAMES,
+            VOSK_MIN_SPEECH_FRAMES,
+            VOSK_MAX_CONTINUOUS_SPEECH_FRAMES
+        );
+    }
+
+    private void rebuildVoiceActivityDetector(EngineType engineType) {
+        double rmsThreshold = sharedPrefs == null
+            ? RMS_THRESHOLD
+            : sharedPrefs.getFloat(PREF_RMS_THRESHOLD, (float) RMS_THRESHOLD);
+        vad = createVoiceActivityDetector(engineType, rmsThreshold);
     }
 
     private void installModelIfMissingAsync(File modelDir) {
@@ -1299,6 +1333,7 @@ public class VoiceListenerService extends Service {
         if (isCapturing) {
             return;
         }
+        whisperRecognitionBuffer.reset();
         ensureTranscriptionExecutor();
         ensureSummaryExecutor();
         if (speechRecognizerFacade == null || !speechRecognizerFacade.hasActiveEngine()) {
@@ -1425,6 +1460,29 @@ public class VoiceListenerService extends Service {
         sharedPrefs.edit().putFloat(PREF_CURRENT_RMS, rms).apply();
     }
 
+    private String normalizeRecognizedText(String recognizedText) {
+        return recognizedText == null ? "" : recognizedText.replaceAll("\\s+", " ").trim();
+    }
+
+    private void handleRecognizedText(String normalizedText) {
+        if (normalizedText.isEmpty()) {
+            return;
+        }
+        if (logManager != null) {
+            try { logManager.writeLog("認識: " + normalizedText); } catch (Exception ignored) {}
+        }
+        String summaryInputText = PendingSummaryBuffer.normalizeSummaryEntry(normalizedText);
+        if (summaryInputText.isEmpty()) {
+            return;
+        }
+        LiveSummaryStore.appendPendingSummaryLog(this, summaryInputText);
+        if (LiveSummaryStore.getPendingSummaryLogCharCount(this) >= LiveSummaryStore.getSummaryForceCharThreshold(this)) {
+            triggerImmediateSummaryRefresh();
+        } else {
+            scheduleSummaryRefresh();
+        }
+    }
+
     private void submitForTranscription(short[] segment) {
         ensureTranscriptionExecutor();
         if (transcriptionExecutor == null) return;
@@ -1433,22 +1491,22 @@ public class VoiceListenerService extends Service {
             try {
                 SpeechRecognizerFacade facade = speechRecognizerFacade; // snapshot to avoid race with release
                 if (facade == null) return;
-                String recognizedText = facade.transcribe(segment);
-                String normalizedText = recognizedText == null ? "" : recognizedText.replaceAll("\\s+", " ").trim();
-                if (!normalizedText.isEmpty()) {
-                    if (logManager != null) {
-                        try { logManager.writeLog("認識: " + normalizedText); } catch (Exception ignored) {}
+                EngineType engineType = facade.currentEngineType();
+                short[] transcriptionSegment = engineType == EngineType.WHISPER
+                    ? whisperRecognitionBuffer.prepare(segment)
+                    : segment;
+                String recognizedText = facade.transcribe(transcriptionSegment);
+                String normalizedText = normalizeRecognizedText(recognizedText);
+                if (normalizedText.isEmpty()) {
+                    if (engineType == EngineType.WHISPER) {
+                        whisperRecognitionBuffer.retainForRetry(transcriptionSegment);
                     }
-                    String summaryInputText = PendingSummaryBuffer.normalizeSummaryEntry(normalizedText);
-                    if (!summaryInputText.isEmpty()) {
-                        LiveSummaryStore.appendPendingSummaryLog(this, summaryInputText);
-                        if (LiveSummaryStore.getPendingSummaryLogCharCount(this) >= LiveSummaryStore.getSummaryForceCharThreshold(this)) {
-                            triggerImmediateSummaryRefresh();
-                        } else {
-                            scheduleSummaryRefresh();
-                        }
-                    }
+                    return;
                 }
+                if (engineType == EngineType.WHISPER) {
+                    whisperRecognitionBuffer.reset();
+                }
+                handleRecognizedText(normalizedText);
             } catch (Exception e) {
                 Log.e(TAG, "Transcription task failed", e);
                 try { if (logManager != null) logManager.writeLog("Transcription例外: " + e.getMessage()); } catch (Exception ignored) {}

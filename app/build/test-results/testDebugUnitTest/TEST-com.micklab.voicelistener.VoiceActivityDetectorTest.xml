@@ -1,5 +1,5 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.micklab.voicelistener.VoiceActivityDetectorTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-03-26T07:02:34" hostname="localhost" time="0.001">
+<testsuite name="com.micklab.voicelistener.VoiceActivityDetectorTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-03-26T09:01:06" hostname="localhost" time="0.001">
   <properties/>
   <testcase name="processFrame_discardsTooShortSpeech" classname="com.micklab.voicelistener.VoiceActivityDetectorTest" time="0.0"/>
   <testcase name="processFrame_keepsPreSpeechFramesInReturnedSegment" classname="com.micklab.voicelistener.VoiceActivityDetectorTest" time="0.0"/>

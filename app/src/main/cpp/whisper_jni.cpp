@@ -153,9 +153,9 @@ Java_com_micklab_voicelistener_WhisperEngine_nativeTranscribe(
     whisper_full_params full_params = whisper_full_default_params(WHISPER_SAMPLING_GREEDY);
     full_params.n_threads = handle->thread_count;
     full_params.translate = false;
-    full_params.no_context = true;
+    full_params.no_context = false;
     full_params.no_timestamps = true;
-    full_params.single_segment = true;
+    full_params.single_segment = false;
     full_params.print_special = false;
     full_params.print_progress = false;
     full_params.print_realtime = false;

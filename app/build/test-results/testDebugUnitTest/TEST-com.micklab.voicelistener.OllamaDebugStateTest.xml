@@ -1,8 +1,9 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.micklab.voicelistener.OllamaDebugStateTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-03-25T09:53:20" hostname="localhost" time="0.002">
+<testsuite name="com.micklab.voicelistener.OllamaDebugStateTest" tests="3" skipped="0" failures="0" errors="0" timestamp="2026-03-26T07:02:34" hostname="localhost" time="0.006">
   <properties/>
+  <testcase name="fromLegacyJson_migratesPromptAndResponseIntoHistory" classname="com.micklab.voicelistener.OllamaDebugStateTest" time="0.005"/>
   <testcase name="toJsonAndBack_preservesNormalizedContent" classname="com.micklab.voicelistener.OllamaDebugStateTest" time="0.001"/>
-  <testcase name="fromInvalidJson_returnsEmptyState" classname="com.micklab.voicelistener.OllamaDebugStateTest" time="0.001"/>
+  <testcase name="fromInvalidJson_returnsEmptyState" classname="com.micklab.voicelistener.OllamaDebugStateTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

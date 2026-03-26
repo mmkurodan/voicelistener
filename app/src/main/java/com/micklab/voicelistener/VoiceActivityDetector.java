@@ -6,12 +6,14 @@ import java.util.Deque;
 
 public class VoiceActivityDetector {
     private static final int PRE_SPEECH_FRAMES = 6;
+    private static final int DEFAULT_MAX_CONTINUOUS_SPEECH_FRAMES = 64;
     private static final double NOISE_FLOOR_ALPHA = 0.08;
     private static final double DYNAMIC_THRESHOLD_MULTIPLIER = 1.8;
 
     private double rmsThreshold;
     private final int maxSilenceFrames;
     private final int minSpeechFrames;
+    private final int maxContinuousSpeechFrames;
 
     private final ArrayList<short[]> bufferedFrames = new ArrayList<>();
     private final Deque<short[]> preSpeechFrames = new ArrayDeque<>();
@@ -21,9 +23,14 @@ public class VoiceActivityDetector {
     private double noiseFloorRms;
 
     public VoiceActivityDetector(double rmsThreshold, int maxSilenceFrames, int minSpeechFrames) {
+        this(rmsThreshold, maxSilenceFrames, minSpeechFrames, DEFAULT_MAX_CONTINUOUS_SPEECH_FRAMES);
+    }
+
+    public VoiceActivityDetector(double rmsThreshold, int maxSilenceFrames, int minSpeechFrames, int maxContinuousSpeechFrames) {
         this.rmsThreshold = rmsThreshold;
         this.maxSilenceFrames = maxSilenceFrames;
         this.minSpeechFrames = minSpeechFrames;
+        this.maxContinuousSpeechFrames = Math.max(minSpeechFrames, maxContinuousSpeechFrames);
         this.noiseFloorRms = Math.max(1.0, rmsThreshold * 0.25);
     }
 
@@ -70,6 +77,9 @@ public class VoiceActivityDetector {
             silenceFrames++;
         }
 
+        if (isSpeech && speechFrames >= maxContinuousSpeechFrames) {
+            return emitBufferedSegmentAndContinue();
+        }
         if (silenceFrames >= maxSilenceFrames) {
             short[] segment = speechFrames >= minSpeechFrames ? concatFrames(bufferedFrames) : null;
             reset();
@@ -90,6 +100,14 @@ public class VoiceActivityDetector {
         speechFrames = 0;
         silenceFrames = 0;
         inSpeech = false;
+    }
+
+    private short[] emitBufferedSegmentAndContinue() {
+        short[] segment = speechFrames >= minSpeechFrames ? concatFrames(bufferedFrames) : null;
+        bufferedFrames.clear();
+        speechFrames = 0;
+        silenceFrames = 0;
+        return segment;
     }
 
     private void rememberPreSpeechFrame(short[] frame) {

@@ -4,8 +4,8 @@ ADDED from /root/voicelistener/app/src/main/AndroidManifest.xml:1:1-63:12
 INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml:1:1-63:12
 INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml:1:1-63:12
 INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml:1:1-63:12
-MERGED from [com.alphacephei:vosk-android:0.3.47] /root/.gradle/caches/8.12/transforms/bda715fc587fc97d3f8c75dc1b90fdde/transformed/jetified-vosk-android-0.3.47/AndroidManifest.xml:2:1-7:12
-MERGED from [net.java.dev.jna:jna:5.13.0] /root/.gradle/caches/8.12/transforms/1d30e27336856678c5310dcd3c99e0d6/transformed/jetified-jna-5.13.0/AndroidManifest.xml:2:1-8:12
+MERGED from [com.alphacephei:vosk-android:0.3.47] /root/.gradle/caches/8.12/transforms/f9662ea05bb3fec3609399774000bbe2/transformed/jetified-vosk-android-0.3.47/AndroidManifest.xml:2:1-7:12
+MERGED from [net.java.dev.jna:jna:5.13.0] /root/.gradle/caches/8.12/transforms/d2f2725c4fbb2c7412d07d236bbdea64/transformed/jetified-jna-5.13.0/AndroidManifest.xml:2:1-8:12
 	package
 		INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml
 	android:versionName
@@ -109,10 +109,10 @@ uses-sdk
 INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml reason: use-sdk injection requested
 INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml
 INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml
-MERGED from [com.alphacephei:vosk-android:0.3.47] /root/.gradle/caches/8.12/transforms/bda715fc587fc97d3f8c75dc1b90fdde/transformed/jetified-vosk-android-0.3.47/AndroidManifest.xml:5:5-44
-MERGED from [com.alphacephei:vosk-android:0.3.47] /root/.gradle/caches/8.12/transforms/bda715fc587fc97d3f8c75dc1b90fdde/transformed/jetified-vosk-android-0.3.47/AndroidManifest.xml:5:5-44
-MERGED from [net.java.dev.jna:jna:5.13.0] /root/.gradle/caches/8.12/transforms/1d30e27336856678c5310dcd3c99e0d6/transformed/jetified-jna-5.13.0/AndroidManifest.xml:7:5-47
-MERGED from [net.java.dev.jna:jna:5.13.0] /root/.gradle/caches/8.12/transforms/1d30e27336856678c5310dcd3c99e0d6/transformed/jetified-jna-5.13.0/AndroidManifest.xml:7:5-47
+MERGED from [com.alphacephei:vosk-android:0.3.47] /root/.gradle/caches/8.12/transforms/f9662ea05bb3fec3609399774000bbe2/transformed/jetified-vosk-android-0.3.47/AndroidManifest.xml:5:5-44
+MERGED from [com.alphacephei:vosk-android:0.3.47] /root/.gradle/caches/8.12/transforms/f9662ea05bb3fec3609399774000bbe2/transformed/jetified-vosk-android-0.3.47/AndroidManifest.xml:5:5-44
+MERGED from [net.java.dev.jna:jna:5.13.0] /root/.gradle/caches/8.12/transforms/d2f2725c4fbb2c7412d07d236bbdea64/transformed/jetified-jna-5.13.0/AndroidManifest.xml:7:5-47
+MERGED from [net.java.dev.jna:jna:5.13.0] /root/.gradle/caches/8.12/transforms/d2f2725c4fbb2c7412d07d236bbdea64/transformed/jetified-jna-5.13.0/AndroidManifest.xml:7:5-47
 	android:targetSdkVersion
 		INJECTED from /root/voicelistener/app/src/main/AndroidManifest.xml
 	android:minSdkVersion

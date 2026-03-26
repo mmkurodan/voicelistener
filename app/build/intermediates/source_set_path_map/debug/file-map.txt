@@ -1,4 +1,4 @@
-com.micklab.voicelistener.app-jetified-jna-5.13.0-0 /root/.gradle/caches/8.12/transforms/1d30e27336856678c5310dcd3c99e0d6/transformed/jetified-jna-5.13.0/res
+com.micklab.voicelistener.app-jetified-jna-5.13.0-0 /root/.gradle/caches/8.12/transforms/d2f2725c4fbb2c7412d07d236bbdea64/transformed/jetified-jna-5.13.0/res
 com.micklab.voicelistener.app-pngs-1 /root/voicelistener/app/build/generated/res/pngs/debug
 com.micklab.voicelistener.app-resValues-2 /root/voicelistener/app/build/generated/res/resValues/debug
 com.micklab.voicelistener.app-packageDebugResources-3 /root/voicelistener/app/build/intermediates/incremental/debug/packageDebugResources/merged.dir

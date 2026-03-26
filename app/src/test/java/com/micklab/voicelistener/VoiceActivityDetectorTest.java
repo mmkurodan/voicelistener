@@ -33,6 +33,29 @@ public class VoiceActivityDetectorTest {
         assertNull(detector.flush());
     }
 
+    @Test
+    public void processFrame_splitsLongContinuousSpeechIntoChunks() {
+        VoiceActivityDetector detector = new VoiceActivityDetector(100.0, 10, 1, 3);
+
+        assertNull(detector.processFrame(frame(200, 200)));
+        assertNull(detector.processFrame(frame(210, 210)));
+        short[] firstChunk = detector.processFrame(frame(220, 220));
+
+        assertNotNull(firstChunk);
+        assertEquals(6, firstChunk.length);
+        assertEquals(200, firstChunk[0]);
+        assertEquals(220, firstChunk[4]);
+
+        assertNull(detector.processFrame(frame(230, 230)));
+        assertNull(detector.processFrame(frame(240, 240)));
+        short[] secondChunk = detector.processFrame(frame(250, 250));
+
+        assertNotNull(secondChunk);
+        assertEquals(6, secondChunk.length);
+        assertEquals(230, secondChunk[0]);
+        assertEquals(250, secondChunk[4]);
+    }
+
     private short[] frame(int first, int second) {
         return new short[] {(short) first, (short) second};
     }

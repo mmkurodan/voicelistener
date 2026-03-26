@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.micklab.voicelistener.PendingSummaryBufferTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-03-26T09:01:06" hostname="localhost" time="0.002">
+<testsuite name="com.micklab.voicelistener.PendingSummaryBufferTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-03-26T18:40:43" hostname="localhost" time="0.004">
   <properties/>
   <testcase name="removeConsumedPrefix_preservesNewerEntries" classname="com.micklab.voicelistener.PendingSummaryBufferTest" time="0.001"/>
-  <testcase name="removeConsumedPrefix_returnsCurrentWhenPrefixDoesNotMatch" classname="com.micklab.voicelistener.PendingSummaryBufferTest" time="0.0"/>
+  <testcase name="removeConsumedPrefix_returnsCurrentWhenPrefixDoesNotMatch" classname="com.micklab.voicelistener.PendingSummaryBufferTest" time="0.001"/>
   <testcase name="appendEntry_skipsMeaninglessSoundsOnly" classname="com.micklab.voicelistener.PendingSummaryBufferTest" time="0.001"/>
-  <testcase name="normalizeSummaryEntry_removesMeaninglessTokensSeparatedBySpaces" classname="com.micklab.voicelistener.PendingSummaryBufferTest" time="0.0"/>
+  <testcase name="normalizeSummaryEntry_removesMeaninglessTokensSeparatedBySpaces" classname="com.micklab.voicelistener.PendingSummaryBufferTest" time="0.001"/>
   <testcase name="appendEntry_joinsNormalizedEntriesWithNewlines" classname="com.micklab.voicelistener.PendingSummaryBufferTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

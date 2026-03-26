@@ -134,6 +134,10 @@ public class LogManager2 {
         return new File(getLogFolder(), activeLogFileName);
     }
 
+    public synchronized String getCurrentLogFilePath() {
+        return getCurrentLogFile().getAbsolutePath();
+    }
+
     private File createNewLogFile() {
         File logFolder = getLogFolder();
         String fileName;
@@ -239,6 +243,7 @@ public class LogManager2 {
             "監視",
             "保留処理",
             "Transcription",
+            "WhisperPerf",
             "要約",
             "Ollama"
         };

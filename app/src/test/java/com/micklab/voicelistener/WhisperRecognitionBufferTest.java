@@ -3,6 +3,7 @@ package com.micklab.voicelistener;
 import org.junit.Test;
 
 import static org.junit.Assert.assertArrayEquals;
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -42,5 +43,18 @@ public class WhisperRecognitionBufferTest {
 
         assertFalse(buffer.hasPendingAudio());
         assertArrayEquals(new short[] {4}, buffer.prepare(new short[] {4}));
+    }
+
+    @Test
+    public void pendingSampleCount_tracksRetainedAudioLength() {
+        WhisperRecognitionBuffer buffer = new WhisperRecognitionBuffer(4);
+
+        buffer.retainForRetry(new short[] {1, 2, 3, 4, 5, 6});
+
+        assertEquals(4, buffer.pendingSampleCount());
+
+        buffer.reset();
+
+        assertEquals(0, buffer.pendingSampleCount());
     }
 }

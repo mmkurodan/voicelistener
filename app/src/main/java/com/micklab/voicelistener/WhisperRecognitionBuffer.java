@@ -49,4 +49,8 @@ public final class WhisperRecognitionBuffer {
     public synchronized boolean hasPendingAudio() {
         return pendingSamples.length > 0;
     }
+
+    public synchronized int pendingSampleCount() {
+        return pendingSamples.length;
+    }
 }

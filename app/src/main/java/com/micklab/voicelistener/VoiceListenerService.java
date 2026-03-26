@@ -39,9 +39,13 @@ import java.util.Locale;
 import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ScheduledExecutorService;
 import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.ThreadFactory;
+import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import android.content.SharedPreferences;
@@ -64,6 +68,7 @@ public class VoiceListenerService extends Service {
     private static final int WHISPER_MAX_RETRY_AUDIO_SAMPLES = SAMPLE_RATE_HZ * 12;
     private static final double RMS_THRESHOLD = 900.0;
     private static final long SUMMARY_DEBOUNCE_MS = 4000L;
+    private static final String TRANSCRIPTION_THREAD_NAME = "WhisperTranscriptionThread";
 
     private static final String LEGACY_VOSK_MODEL_FOLDER = "vosk-model-ja";
     private static final String MODELS_FOLDER = "models";
@@ -95,7 +100,7 @@ public class VoiceListenerService extends Service {
     private LogManager2 logManager;
     private VoiceActivityDetector vad;
     private SpeechRecognizerFacade speechRecognizerFacade;
-    private ExecutorService transcriptionExecutor;
+    private ThreadPoolExecutor transcriptionExecutor;
     private ExecutorService modelInstallerExecutor;
     private ScheduledExecutorService summaryExecutor;
     private SharedPreferences sharedPrefs;
@@ -103,6 +108,7 @@ public class VoiceListenerService extends Service {
     private final OllamaClient ollamaClient = new OllamaClient();
     private final WhisperRecognitionBuffer whisperRecognitionBuffer =
         new WhisperRecognitionBuffer(WHISPER_MAX_RETRY_AUDIO_SAMPLES);
+    private final AtomicLong whisperTraceCounter = new AtomicLong(0L);
 
     private AudioRecord audioRecord;
     private NoiseSuppressor noiseSuppressor;
@@ -122,6 +128,7 @@ public class VoiceListenerService extends Service {
         Log.d(TAG, "VoiceListenerService created");
 
         logManager = new LogManager2(this);
+        WhisperPerfLogger.initialize(logManager);
 
         // VAD閾値は SharedPreferences から取得して初期化する
         sharedPrefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
@@ -142,7 +149,7 @@ public class VoiceListenerService extends Service {
         };
         sharedPrefs.registerOnSharedPreferenceChangeListener(prefsListener);
 
-        transcriptionExecutor = Executors.newSingleThreadExecutor();
+        transcriptionExecutor = createTranscriptionExecutor();
         modelInstallerExecutor = Executors.newSingleThreadExecutor();
         summaryExecutor = Executors.newSingleThreadScheduledExecutor();
         speechRecognizerFacade = SpeechRecognizerFacade.createDefault();
@@ -460,6 +467,16 @@ public class VoiceListenerService extends Service {
 
     private VoiceActivityDetector createVoiceActivityDetector(EngineType engineType, double rmsThreshold) {
         if (engineType == EngineType.WHISPER) {
+            logWhisperTrace(
+                RecognitionTraceContext.NO_TRACE_ID,
+                "vad.config",
+                "engine=WHISPER frameSamples=" + FRAME_SAMPLES
+                    + " frameMs=" + samplesToMillis(FRAME_SAMPLES)
+                    + " rmsThreshold=" + String.format(Locale.US, "%.1f", rmsThreshold)
+                    + " minSpeechFrames=" + WHISPER_MIN_SPEECH_FRAMES
+                    + " maxSilenceFrames=" + WHISPER_MAX_SILENCE_FRAMES
+                    + " maxContinuousSpeechFrames=" + WHISPER_MAX_CONTINUOUS_SPEECH_FRAMES
+            );
             return new VoiceActivityDetector(
                 rmsThreshold,
                 WHISPER_MAX_SILENCE_FRAMES,
@@ -505,18 +522,43 @@ public class VoiceListenerService extends Service {
     }
 
     private boolean initializeWhisperEngine() {
+        long resolveStartedNs = System.nanoTime();
         try {
             File modelFile = WhisperModelManager.resolvePreferredDownloadedModelFile(this);
-            if (!WhisperModelManager.hasModelContent(modelFile)) {
+            boolean usedBundledModel = false;
+            if (modelFile == null || !WhisperModelManager.hasModelContent(modelFile)) {
                 modelFile = WhisperModelAssetInstaller.ensureBundledModelCopied(this);
+                usedBundledModel = true;
             }
+            long resolveMs = nanosToMillis(System.nanoTime() - resolveStartedNs);
             if (modelFile == null || !modelFile.exists()) {
+                logWhisperTrace(
+                    RecognitionTraceContext.NO_TRACE_ID,
+                    "model.resolve.miss",
+                    "resolveMs=" + resolveMs
+                        + " source=" + (usedBundledModel ? "bundled" : "downloaded")
+                );
                 try { if (logManager != null) logManager.writeLog("Whisperモデルが見つかりません: ダウンロード済みモデルまたは assets/models/*.gguf を確認してください", false); } catch (Exception ignored) {}
                 return false;
             }
+            logWhisperTrace(
+                RecognitionTraceContext.NO_TRACE_ID,
+                "model.resolve",
+                "resolveMs=" + resolveMs
+                    + " source=" + (usedBundledModel ? "bundled" : "downloaded")
+                    + " path=" + modelFile.getAbsolutePath()
+                    + " sizeBytes=" + modelFile.length()
+            );
             return initializeWhisperEngineWithModel(modelFile);
         } catch (Exception e) {
+            long resolveMs = nanosToMillis(System.nanoTime() - resolveStartedNs);
             Log.e(TAG, "Failed to prepare Whisper model", e);
+            logWhisperTrace(
+                RecognitionTraceContext.NO_TRACE_ID,
+                "model.resolve.error",
+                "resolveMs=" + resolveMs
+                    + " error=" + e.getClass().getSimpleName() + ":" + String.valueOf(e.getMessage())
+            );
             try { if (logManager != null) logManager.writeLog("Whisperモデル準備失敗: " + e.getMessage(), false); } catch (Exception ignored) {}
             return false;
         }
@@ -524,6 +566,11 @@ public class VoiceListenerService extends Service {
 
     private boolean initializeWhisperEngineWithModel(File modelFile) {
         if (!WhisperModelManager.hasModelContent(modelFile)) {
+            logWhisperTrace(
+                RecognitionTraceContext.NO_TRACE_ID,
+                "model.validate.miss",
+                "path=" + (modelFile == null ? "<null>" : modelFile.getAbsolutePath())
+            );
             return false;
         }
         SpeechRecognizerConfig config = new SpeechRecognizerConfig(
@@ -533,9 +580,32 @@ public class VoiceListenerService extends Service {
             "ja",
             SpeechRecognizerConfig.defaultThreadCount()
         );
+        logWhisperTrace(
+            RecognitionTraceContext.NO_TRACE_ID,
+            "engine.configure.begin",
+            "modelPath=" + modelFile.getAbsolutePath()
+                + " sizeBytes=" + modelFile.length()
+                + " sampleRateHz=" + config.getSampleRateHz()
+                + " language=" + config.getLanguage()
+                + " threadCount=" + config.getThreadCount()
+                + " availableProcessors=" + Runtime.getRuntime().availableProcessors()
+        );
+        long configureStartedNs = System.nanoTime();
         if (!configureSpeechRecognizer(config)) {
+            logWhisperTrace(
+                RecognitionTraceContext.NO_TRACE_ID,
+                "engine.configure.failed",
+                "elapsedMs=" + nanosToMillis(System.nanoTime() - configureStartedNs)
+                    + " modelPath=" + modelFile.getAbsolutePath()
+            );
             return false;
         }
+        logWhisperTrace(
+            RecognitionTraceContext.NO_TRACE_ID,
+            "engine.configure.done",
+            "elapsedMs=" + nanosToMillis(System.nanoTime() - configureStartedNs)
+                + " modelPath=" + modelFile.getAbsolutePath()
+        );
         Log.i(TAG, "ASR engine: " + config.getEngineType().getDisplayName() + " @ " + modelFile.getAbsolutePath());
         return true;
     }
@@ -544,11 +614,28 @@ public class VoiceListenerService extends Service {
         if (speechRecognizerFacade == null) {
             speechRecognizerFacade = SpeechRecognizerFacade.createDefault();
         }
+        long selectStartedNs = System.nanoTime();
         try {
             speechRecognizerFacade.selectEngine(config);
+            if (config.getEngineType() == EngineType.WHISPER) {
+                logWhisperTrace(
+                    RecognitionTraceContext.NO_TRACE_ID,
+                    "facade.selectEngine",
+                    "elapsedMs=" + nanosToMillis(System.nanoTime() - selectStartedNs)
+                        + " engineType=" + config.getEngineType()
+                );
+            }
             return true;
         } catch (Exception e) {
             Log.e(TAG, "Speech recognizer configuration failed: " + config.getEngineType().getDisplayName(), e);
+            if (config.getEngineType() == EngineType.WHISPER) {
+                logWhisperTrace(
+                    RecognitionTraceContext.NO_TRACE_ID,
+                    "facade.selectEngine.error",
+                    "elapsedMs=" + nanosToMillis(System.nanoTime() - selectStartedNs)
+                        + " error=" + e.getClass().getSimpleName() + ":" + String.valueOf(e.getMessage())
+                );
+            }
             try {
                 if (logManager != null) {
                     logManager.writeLog("認識エンジン初期化失敗 (" + config.getEngineType().getDisplayName() + "): " + e.getMessage(), false);
@@ -971,8 +1058,26 @@ public class VoiceListenerService extends Service {
 
     private void ensureTranscriptionExecutor() {
         if (transcriptionExecutor == null || transcriptionExecutor.isShutdown() || transcriptionExecutor.isTerminated()) {
-            transcriptionExecutor = Executors.newSingleThreadExecutor();
+            transcriptionExecutor = createTranscriptionExecutor();
         }
+    }
+
+    private ThreadPoolExecutor createTranscriptionExecutor() {
+        return new ThreadPoolExecutor(
+            1,
+            1,
+            0L,
+            TimeUnit.MILLISECONDS,
+            new LinkedBlockingQueue<>(),
+            new ThreadFactory() {
+                @Override
+                public Thread newThread(Runnable runnable) {
+                    Thread thread = new Thread(runnable, TRANSCRIPTION_THREAD_NAME);
+                    thread.setDaemon(false);
+                    return thread;
+                }
+            }
+        );
     }
 
     private void ensureSummaryExecutor() {
@@ -1333,6 +1438,15 @@ public class VoiceListenerService extends Service {
         if (isCapturing) {
             return;
         }
+        int pendingRetrySamples = whisperRecognitionBuffer.pendingSampleCount();
+        if (pendingRetrySamples > 0) {
+            logWhisperTrace(
+                RecognitionTraceContext.NO_TRACE_ID,
+                "retry.reset",
+                "reason=capture.start pendingBefore=" + pendingRetrySamples
+                    + " pendingBeforeMs=" + samplesToMillis(pendingRetrySamples)
+            );
+        }
         whisperRecognitionBuffer.reset();
         ensureTranscriptionExecutor();
         ensureSummaryExecutor();
@@ -1419,6 +1533,18 @@ public class VoiceListenerService extends Service {
         captureThread = new Thread(this::captureLoop, "AudioCaptureThread");
         captureThread.start();
         Log.i(TAG, "AudioRecord capture started: " + audioSourceLabel(activeAudioSource));
+        if (isWhisperActiveEngine()) {
+            logWhisperTrace(
+                RecognitionTraceContext.NO_TRACE_ID,
+                "capture.start",
+                "audioSource=" + audioSourceLabel(activeAudioSource)
+                    + " frameSamples=" + FRAME_SAMPLES
+                    + " frameMs=" + samplesToMillis(FRAME_SAMPLES)
+                    + " minBufferBytes=" + minBufferBytes
+                    + " recordBufferBytes=" + recordBufferBytes
+                    + " " + describeExecutorState(transcriptionExecutor)
+            );
+        }
         try { if (sharedPrefs != null) sharedPrefs.edit().putString(PREF_MON_STATE, MON_STATE_RUNNING).apply(); } catch (Exception ignored) {}
         try { if (logManager != null) logManager.writeLog("録音開始 (" + audioSourceLabel(activeAudioSource) + ")"); } catch (Exception ignored) {}
     }
@@ -1440,6 +1566,16 @@ public class VoiceListenerService extends Service {
             publishCurrentRms(frame);
             short[] segment = vad.processFrame(frame);
             if (segment != null && segment.length > 0) {
+                if (isWhisperActiveEngine()) {
+                    logWhisperTrace(
+                        RecognitionTraceContext.NO_TRACE_ID,
+                        "segment.ready",
+                        "samples=" + segment.length
+                            + " segmentMs=" + samplesToMillis(segment.length)
+                            + " pendingRetrySamples=" + whisperRecognitionBuffer.pendingSampleCount()
+                            + " " + describeExecutorState(transcriptionExecutor)
+                    );
+                }
                 submitForTranscription(segment);
             }
         }
@@ -1487,40 +1623,151 @@ public class VoiceListenerService extends Service {
         ensureTranscriptionExecutor();
         if (transcriptionExecutor == null) return;
 
+        SpeechRecognizerFacade currentFacade = speechRecognizerFacade;
+        EngineType initialEngineType = currentFacade == null ? null : currentFacade.currentEngineType();
+        final long traceId = initialEngineType == EngineType.WHISPER
+            ? whisperTraceCounter.incrementAndGet()
+            : RecognitionTraceContext.NO_TRACE_ID;
+        final int rawSamples = segment == null ? 0 : segment.length;
+        final long queuedAtNs = System.nanoTime();
+
+        if (traceId != RecognitionTraceContext.NO_TRACE_ID) {
+            logWhisperTrace(
+                traceId,
+                "queue.submit",
+                "rawSamples=" + rawSamples
+                    + " rawMs=" + samplesToMillis(rawSamples)
+                    + " pendingRetrySamples=" + whisperRecognitionBuffer.pendingSampleCount()
+                    + " " + describeExecutorState(transcriptionExecutor)
+            );
+        }
+
         Runnable task = () -> {
+            long taskStartedNs = System.nanoTime();
+            RecognitionTraceContext.set(traceId);
             try {
                 SpeechRecognizerFacade facade = speechRecognizerFacade; // snapshot to avoid race with release
-                if (facade == null) return;
-                EngineType engineType = facade.currentEngineType();
-                short[] transcriptionSegment = engineType == EngineType.WHISPER
-                    ? whisperRecognitionBuffer.prepare(segment)
-                    : segment;
-                String recognizedText = facade.transcribe(transcriptionSegment);
-                String normalizedText = normalizeRecognizedText(recognizedText);
-                if (normalizedText.isEmpty()) {
-                    if (engineType == EngineType.WHISPER) {
-                        whisperRecognitionBuffer.retainForRetry(transcriptionSegment);
+                long queueWaitMs = nanosToMillis(taskStartedNs - queuedAtNs);
+                if (facade == null) {
+                    if (traceId != RecognitionTraceContext.NO_TRACE_ID) {
+                        logWhisperTrace(traceId, "queue.skip", "reason=no-facade queueWaitMs=" + queueWaitMs);
                     }
                     return;
                 }
-                if (engineType == EngineType.WHISPER) {
+                EngineType engineType = facade.currentEngineType();
+                boolean whisperRequest = engineType == EngineType.WHISPER;
+                if (traceId != RecognitionTraceContext.NO_TRACE_ID) {
+                    logWhisperTrace(
+                        traceId,
+                        "queue.start",
+                        "queueWaitMs=" + queueWaitMs
+                            + " engineType=" + engineType
+                            + " rawSamples=" + rawSamples
+                            + " rawMs=" + samplesToMillis(rawSamples)
+                            + " " + describeExecutorState(transcriptionExecutor)
+                    );
+                }
+                short[] transcriptionSegment = segment;
+                if (whisperRequest) {
+                    int pendingBefore = whisperRecognitionBuffer.pendingSampleCount();
+                    long prepareStartedNs = System.nanoTime();
+                    transcriptionSegment = whisperRecognitionBuffer.prepare(segment);
+                    long prepareMs = nanosToMillis(System.nanoTime() - prepareStartedNs);
+                    logWhisperTrace(
+                        traceId,
+                        "retry.prepare",
+                        "incomingSamples=" + rawSamples
+                            + " incomingMs=" + samplesToMillis(rawSamples)
+                            + " pendingBefore=" + pendingBefore
+                            + " preparedSamples=" + transcriptionSegment.length
+                            + " preparedMs=" + samplesToMillis(transcriptionSegment.length)
+                            + " copyMs=" + prepareMs
+                    );
+                }
+                long transcribeStartedNs = System.nanoTime();
+                String recognizedText = facade.transcribe(transcriptionSegment);
+                long transcribeMs = nanosToMillis(System.nanoTime() - transcribeStartedNs);
+                String normalizedText = normalizeRecognizedText(recognizedText);
+                if (whisperRequest) {
+                    logWhisperTrace(
+                        traceId,
+                        "queue.result",
+                        "preparedSamples=" + transcriptionSegment.length
+                            + " preparedMs=" + samplesToMillis(transcriptionSegment.length)
+                            + " recognizedChars=" + normalizedText.length()
+                            + " empty=" + normalizedText.isEmpty()
+                            + " transcribeMs=" + transcribeMs
+                    );
+                }
+                if (normalizedText.isEmpty()) {
+                    if (whisperRequest) {
+                        int pendingBeforeRetain = whisperRecognitionBuffer.pendingSampleCount();
+                        long retainStartedNs = System.nanoTime();
+                        whisperRecognitionBuffer.retainForRetry(transcriptionSegment);
+                        long retainMs = nanosToMillis(System.nanoTime() - retainStartedNs);
+                        int pendingAfterRetain = whisperRecognitionBuffer.pendingSampleCount();
+                        logWhisperTrace(
+                            traceId,
+                            "retry.retain",
+                            "pendingBefore=" + pendingBeforeRetain
+                                + " pendingAfter=" + pendingAfterRetain
+                                + " pendingAfterMs=" + samplesToMillis(pendingAfterRetain)
+                                + " retainMs=" + retainMs
+                        );
+                    }
+                    return;
+                }
+                if (whisperRequest) {
+                    int pendingBeforeReset = whisperRecognitionBuffer.pendingSampleCount();
+                    if (pendingBeforeReset > 0) {
+                        logWhisperTrace(
+                            traceId,
+                            "retry.reset",
+                            "reason=recognized pendingBefore=" + pendingBeforeReset
+                                + " pendingBeforeMs=" + samplesToMillis(pendingBeforeReset)
+                        );
+                    }
                     whisperRecognitionBuffer.reset();
                 }
                 handleRecognizedText(normalizedText);
+                if (whisperRequest) {
+                    logWhisperTrace(
+                        traceId,
+                        "queue.complete",
+                        "recognizedChars=" + normalizedText.length()
+                            + " totalTaskMs=" + nanosToMillis(System.nanoTime() - taskStartedNs)
+                    );
+                }
             } catch (Exception e) {
+                if (traceId != RecognitionTraceContext.NO_TRACE_ID) {
+                    logWhisperTrace(
+                        traceId,
+                        "queue.error",
+                        "error=" + e.getClass().getSimpleName() + ":" + String.valueOf(e.getMessage())
+                            + " totalTaskMs=" + nanosToMillis(System.nanoTime() - taskStartedNs)
+                    );
+                }
                 Log.e(TAG, "Transcription task failed", e);
                 try { if (logManager != null) logManager.writeLog("Transcription例外: " + e.getMessage()); } catch (Exception ignored) {}
+            } finally {
+                RecognitionTraceContext.clear();
             }
         };
 
         try {
             transcriptionExecutor.execute(task);
         } catch (RejectedExecutionException ex) {
+            if (traceId != RecognitionTraceContext.NO_TRACE_ID) {
+                logWhisperTrace(traceId, "queue.reject", "phase=initial " + describeExecutorState(transcriptionExecutor));
+            }
             Log.w(TAG, "Transcription executor rejected task, recreating executor");
             ensureTranscriptionExecutor();
             try {
                 transcriptionExecutor.execute(task);
             } catch (RejectedExecutionException e) {
+                if (traceId != RecognitionTraceContext.NO_TRACE_ID) {
+                    logWhisperTrace(traceId, "queue.reject", "phase=after-recreate " + describeExecutorState(transcriptionExecutor));
+                }
                 Log.e(TAG, "Transcription task dropped after executor recreate", e);
                 try { if (logManager != null) logManager.writeLog("Transcription投入失敗: " + e.getMessage(), false); } catch (Exception ignored) {}
             }
@@ -1559,10 +1806,52 @@ public class VoiceListenerService extends Service {
         if (vad != null) {
             short[] flushed = vad.flush();
             if (flushed != null && flushed.length > 0) {
+                if (isWhisperActiveEngine()) {
+                    logWhisperTrace(
+                        RecognitionTraceContext.NO_TRACE_ID,
+                        "segment.flush",
+                        "samples=" + flushed.length
+                            + " segmentMs=" + samplesToMillis(flushed.length)
+                            + " pendingRetrySamples=" + whisperRecognitionBuffer.pendingSampleCount()
+                    );
+                }
                 submitForTranscription(flushed);
             }
         }
         try { if (sharedPrefs != null) sharedPrefs.edit().putFloat(PREF_CURRENT_RMS, 0f).apply(); } catch (Exception ignored) {}
+    }
+
+    private boolean isWhisperActiveEngine() {
+        return speechRecognizerFacade != null && speechRecognizerFacade.currentEngineType() == EngineType.WHISPER;
+    }
+
+    private void logWhisperTrace(long traceId, String stage, String details) {
+        String traceValue = traceId == RecognitionTraceContext.NO_TRACE_ID ? "none" : Long.toString(traceId);
+        logWhisperPerf("trace=" + traceValue + " stage=" + stage + " " + details);
+    }
+
+    private void logWhisperPerf(String message) {
+        WhisperPerfLogger.logLine(message);
+    }
+
+    private static long nanosToMillis(long elapsedNs) {
+        return TimeUnit.NANOSECONDS.toMillis(elapsedNs);
+    }
+
+    private static long samplesToMillis(int sampleCount) {
+        if (sampleCount <= 0) {
+            return 0L;
+        }
+        return Math.round(sampleCount * 1000.0d / SAMPLE_RATE_HZ);
+    }
+
+    private static String describeExecutorState(ThreadPoolExecutor executor) {
+        if (executor == null) {
+            return "queue=na active=na completed=na";
+        }
+        return "queue=" + executor.getQueue().size()
+            + " active=" + executor.getActiveCount()
+            + " completed=" + executor.getCompletedTaskCount();
     }
 
     private AudioRecord createAudioRecord(int recordBufferBytes) {

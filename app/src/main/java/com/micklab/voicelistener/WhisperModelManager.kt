@@ -9,8 +9,9 @@ import java.nio.charset.StandardCharsets
 import java.util.Locale
 
 object WhisperModelManager {
+    const val DEFAULT_MODEL_NAME = "whisper-medium-q8_0.gguf"
     const val DEFAULT_MODEL_URL =
-        "https://huggingface.co/vonjack/whisper-large-v3-gguf/resolve/main/whisper-large-v3-f16.gguf?download=true"
+        "https://huggingface.co/oxide-lab/whisper-medium-GGUF/resolve/main/whisper.cpp/whisper-medium-q8_0.gguf?download=true"
 
     private const val PREFS_NAME = "VoiceListenerPrefs"
     const val PREF_ACTIVE_MODEL_NAME = "whisper_active_model_name"
@@ -50,6 +51,13 @@ object WhisperModelManager {
             throw IllegalArgumentException("Whisperモデル名が不正です")
         }
         return sanitized
+    }
+
+    @JvmStatic
+    fun describeQuantization(modelName: String?): String {
+        val normalizedName = normalizeModelName(modelName) ?: return "unknown"
+        val match = QUANTIZATION_PATTERN.find(normalizedName)
+        return match?.value?.lowercase(Locale.US) ?: "unknown"
     }
 
     @JvmStatic
@@ -138,4 +146,6 @@ object WhisperModelManager {
         val segment = path?.substringAfterLast('/')?.trim().orEmpty()
         return segment.ifEmpty { null }
     }
+
+    private val QUANTIZATION_PATTERN = Regex("(?i)(q\\d+_[0-9]+|f16|f32|bf16)")
 }

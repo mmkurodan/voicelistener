@@ -7,6 +7,7 @@
 #include <cstdio>
 #include <memory>
 #include <mutex>
+#include <sys/stat.h>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -17,6 +18,12 @@ namespace {
 
 constexpr const char * kLogTag = "WhisperJni";
 constexpr float kPcm16Scale = 1.0f / 32768.0f;
+#ifndef WHISPER_JNI_STREAM_CHUNK_SAMPLES
+#define WHISPER_JNI_STREAM_CHUNK_SAMPLES 1024
+#endif
+#ifndef WHISPER_JNI_STREAM_RESERVE_SAMPLES
+#define WHISPER_JNI_STREAM_RESERVE_SAMPLES 4096
+#endif
 
 struct WhisperHandle {
     whisper_context * context = nullptr;
@@ -61,11 +68,62 @@ long long elapsed_ms(
     return std::chrono::duration_cast<std::chrono::milliseconds>(finished_at - started_at).count();
 }
 
+long long now_epoch_ms() {
+    return std::chrono::duration_cast<std::chrono::milliseconds>(
+        std::chrono::system_clock::now().time_since_epoch()
+    ).count();
+}
+
 long long samples_to_ms(int sample_count, int sample_rate_hz) {
     if (sample_count <= 0 || sample_rate_hz <= 0) {
         return 0LL;
     }
     return (static_cast<long long>(sample_count) * 1000LL) / static_cast<long long>(sample_rate_hz);
+}
+
+std::string lower_copy(std::string value) {
+    std::transform(value.begin(), value.end(), value.begin(), [](unsigned char ch) {
+        return static_cast<char>(std::tolower(ch));
+    });
+    return value;
+}
+
+std::string file_name_from_path(std::string_view path) {
+    const size_t separator_index = path.find_last_of("/\\");
+    if (separator_index == std::string_view::npos) {
+        return std::string(path);
+    }
+    return std::string(path.substr(separator_index + 1U));
+}
+
+std::string infer_quantization(std::string_view model_path) {
+    const std::string normalized_name = lower_copy(file_name_from_path(model_path));
+    static constexpr const char * kKnownQuantizations[] = {
+        "q8_0",
+        "q6_k",
+        "q5_1",
+        "q5_0",
+        "q4_1",
+        "q4_0",
+        "f16",
+        "f32",
+        "bf16",
+    };
+    for (const char * candidate : kKnownQuantizations) {
+        if (normalized_name.find(candidate) != std::string::npos) {
+            return candidate;
+        }
+    }
+    return "unknown";
+}
+
+long long file_size_bytes(const std::string & path) {
+    struct stat file_stat {
+    };
+    if (stat(path.c_str(), &file_stat) != 0) {
+        return -1LL;
+    }
+    return static_cast<long long>(file_stat.st_size);
 }
 
 void log_perf(long long trace_id, const char * stage, const std::string & details) {
@@ -218,8 +276,24 @@ Java_com_micklab_voicelistener_WhisperEngine_nativeLoadModel(
     handle->sample_rate_hz = sample_rate_hz <= 0 ? WHISPER_SAMPLE_RATE : sample_rate_hz;
     handle->thread_count = thread_count_value;
     handle->language = language_value;
-    handle->pcmf32.reserve(static_cast<size_t>(handle->sample_rate_hz) * 4U);
-    handle->pcm16.reserve(static_cast<size_t>(handle->sample_rate_hz) * 4U);
+    handle->pcmf32.reserve(static_cast<size_t>(WHISPER_JNI_STREAM_RESERVE_SAMPLES));
+    handle->pcm16.reserve(static_cast<size_t>(WHISPER_JNI_STREAM_RESERVE_SAMPLES));
+
+    const std::string quantization = infer_quantization(model_path_value);
+    const long long model_size_bytes_value = file_size_bytes(model_path_value);
+    const char * model_type_value = whisper_model_type_readable(context);
+    const int model_ftype_value = whisper_model_ftype(context);
+
+    log_perf(
+        env,
+        -1,
+        "native.load.model",
+        "path=" + model_path_value
+            + " modelSizeBytes=" + std::to_string(model_size_bytes_value)
+            + " modelType=" + std::string(model_type_value == nullptr ? "unknown" : model_type_value)
+            + " quantization=" + quantization
+            + " ftype=" + std::to_string(model_ftype_value)
+    );
 
     log_perf(
         env,
@@ -229,7 +303,9 @@ Java_com_micklab_voicelistener_WhisperEngine_nativeLoadModel(
             + " sampleRateHz=" + std::to_string(handle->sample_rate_hz)
             + " language=" + (handle->language.empty() ? std::string("auto") : handle->language)
             + " threadCount=" + std::to_string(handle->thread_count)
-            + " reserveSamples=" + std::to_string(handle->sample_rate_hz * 4)
+            + " streamChunkSamples=" + std::to_string(WHISPER_JNI_STREAM_CHUNK_SAMPLES)
+            + " reserveSamples=" + std::to_string(WHISPER_JNI_STREAM_RESERVE_SAMPLES)
+            + " quantization=" + quantization
             + " elapsedMs=" + std::to_string(load_ms)
     );
 
@@ -243,9 +319,11 @@ Java_com_micklab_voicelistener_WhisperEngine_nativeTranscribe(
     jobject /* thiz */,
     jlong native_handle,
     jshortArray audio_buffer,
-    jlong trace_id
+    jlong trace_id,
+    jint queue_length
 ) {
     const long long trace_id_value = static_cast<long long>(trace_id);
+    const int queue_length_value = std::max(0, static_cast<int>(queue_length));
     WhisperHandle * handle = cast_handle(native_handle);
     if (handle == nullptr || handle->context == nullptr || audio_buffer == nullptr) {
         log_perf(env, trace_id_value, "native.transcribe.skip", "reason=invalid-input");
@@ -265,16 +343,21 @@ Java_com_micklab_voicelistener_WhisperEngine_nativeTranscribe(
     const long long lock_wait_ms = elapsed_ms(lock_requested_at, lock_acquired_at);
 
     const std::string language_value = handle->language.empty() ? "auto" : handle->language;
+    const long long started_at_ms = now_epoch_ms();
     log_perf(
         env,
         trace_id_value,
         "native.transcribe.begin",
-        "samples=" + std::to_string(sample_count)
+        "startedAtMs=" + std::to_string(started_at_ms)
+            + " chunkSamples=" + std::to_string(sample_count)
+            + " chunkBytes=" + std::to_string(static_cast<long long>(sample_count) * static_cast<long long>(sizeof(jshort)))
+            + " samples=" + std::to_string(sample_count)
             + " bufferMs=" + std::to_string(samples_to_ms(sample_count, handle->sample_rate_hz))
             + " sampleRateHz=" + std::to_string(handle->sample_rate_hz)
             + " threadCount=" + std::to_string(handle->thread_count)
             + " language=" + language_value
             + " lockWaitMs=" + std::to_string(lock_wait_ms)
+            + " queueLength=" + std::to_string(queue_length_value)
     );
 
     handle->pcm16.resize(static_cast<size_t>(sample_count));
@@ -307,12 +390,14 @@ Java_com_micklab_voicelistener_WhisperEngine_nativeTranscribe(
     full_params.translate = false;
     full_params.no_context = true;
     full_params.no_timestamps = true;
-    full_params.single_segment = false;
+    full_params.single_segment = true;
     full_params.print_special = false;
     full_params.print_progress = false;
     full_params.print_realtime = false;
     full_params.print_timestamps = false;
     full_params.token_timestamps = false;
+    // In whisper.cpp v1.8.4, max_len is a character limit; forcing 1 would fragment output excessively.
+    full_params.max_len = 0;
     full_params.temperature = 0.0f;
     full_params.max_tokens = 0;
     full_params.suppress_blank = true;
@@ -360,16 +445,22 @@ Java_com_micklab_voicelistener_WhisperEngine_nativeTranscribe(
     transcription = trim_copy(transcription);
     const auto total_finished_at = std::chrono::steady_clock::now();
     const long long total_ms = elapsed_ms(total_started_at, total_finished_at);
+    const long long finished_at_ms = now_epoch_ms();
     log_perf(
         env,
         trace_id_value,
         "native.transcribe",
-        "samples=" + std::to_string(sample_count)
+        "startedAtMs=" + std::to_string(started_at_ms)
+            + " finishedAtMs=" + std::to_string(finished_at_ms)
+            + " chunkSamples=" + std::to_string(sample_count)
+            + " chunkBytes=" + std::to_string(static_cast<long long>(sample_count) * static_cast<long long>(sizeof(jshort)))
+            + " samples=" + std::to_string(sample_count)
             + " bufferMs=" + std::to_string(samples_to_ms(sample_count, handle->sample_rate_hz))
             + " sampleRateHz=" + std::to_string(handle->sample_rate_hz)
             + " threadCount=" + std::to_string(handle->thread_count)
             + " language=" + language_value
             + " lockWaitMs=" + std::to_string(lock_wait_ms)
+            + " queueLength=" + std::to_string(queue_length_value)
             + " copyMs=" + std::to_string(copy_ms)
             + " convertMs=" + std::to_string(convert_ms)
             + " inferMs=" + std::to_string(inference_ms)

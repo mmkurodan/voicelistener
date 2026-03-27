@@ -69,6 +69,8 @@ target_compile_definitions(
     whisper_jni
     PRIVATE
     WHISPER_USE_CPU=1
+    WHISPER_JNI_STREAM_CHUNK_SAMPLES=1024
+    WHISPER_JNI_STREAM_RESERVE_SAMPLES=4096
 )
 
 if (ANDROID_ABI STREQUAL "arm64-v8a")

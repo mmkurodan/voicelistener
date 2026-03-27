@@ -74,6 +74,24 @@ class SpeechRecognizerFacade @JvmOverloads constructor(
         }
     }
 
+    fun flush(): String {
+        val enteredNs = System.nanoTime()
+        return lock.withLock {
+            val lockWaitMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - enteredNs)
+            val engineType = currentEngineType
+            val delegateStartedNs = System.nanoTime()
+            val result = currentEngine.flush()
+            if (engineType == EngineType.WHISPER) {
+                val delegateMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - delegateStartedNs)
+                logWhisperPerf(
+                    "facade.flush",
+                    "engineType=$engineType chars=${result.length} lockWaitMs=$lockWaitMs delegateMs=$delegateMs started=$started"
+                )
+            }
+            result
+        }
+    }
+
     private fun logWhisperPerf(stage: String, details: String) {
         WhisperPerfLogger.logTrace(RecognitionTraceContext.currentId(), stage, details)
     }

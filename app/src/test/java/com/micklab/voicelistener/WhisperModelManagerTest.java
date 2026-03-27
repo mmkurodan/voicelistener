@@ -23,9 +23,14 @@ public class WhisperModelManagerTest {
     @Test
     public void deriveModelNameFromUrl_keepsGgufFileName() {
         assertEquals(
-            "whisper-large-v3-f16.gguf",
+            "whisper-medium-q8_0.gguf",
             WhisperModelManager.deriveModelNameFromUrl(WhisperModelManager.DEFAULT_MODEL_URL)
         );
+    }
+
+    @Test
+    public void describeQuantization_readsQuantizedModelName() {
+        assertEquals("q8_0", WhisperModelManager.describeQuantization("whisper-medium-q8_0.gguf"));
     }
 
     @Test

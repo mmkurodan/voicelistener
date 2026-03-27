@@ -1,10 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.micklab.voicelistener.WhisperModelManagerTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-03-26T18:40:43" hostname="localhost" time="0.017">
+<testsuite name="com.micklab.voicelistener.WhisperModelManagerTest" tests="6" skipped="0" failures="0" errors="0" timestamp="2026-03-27T00:32:05" hostname="localhost" time="0.02">
   <properties/>
-  <testcase name="normalizeModelUrl_usesDefaultForBlankInput" classname="com.micklab.voicelistener.WhisperModelManagerTest" time="0.01"/>
+  <testcase name="normalizeModelUrl_usesDefaultForBlankInput" classname="com.micklab.voicelistener.WhisperModelManagerTest" time="0.011"/>
   <testcase name="deriveModelNameFromUrl_keepsGgufFileName" classname="com.micklab.voicelistener.WhisperModelManagerTest" time="0.004"/>
   <testcase name="deriveModelNameFromUrl_sanitizesUnsafeCharacters" classname="com.micklab.voicelistener.WhisperModelManagerTest" time="0.001"/>
-  <testcase name="deriveModelNameFromUrl_rejectsNonGgufFiles" classname="com.micklab.voicelistener.WhisperModelManagerTest" time="0.0"/>
+  <testcase name="deriveModelNameFromUrl_rejectsNonGgufFiles" classname="com.micklab.voicelistener.WhisperModelManagerTest" time="0.001"/>
+  <testcase name="describeQuantization_readsQuantizedModelName" classname="com.micklab.voicelistener.WhisperModelManagerTest" time="0.002"/>
   <testcase name="normalizeModelName_returnsNullForBlankInput" classname="com.micklab.voicelistener.WhisperModelManagerTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

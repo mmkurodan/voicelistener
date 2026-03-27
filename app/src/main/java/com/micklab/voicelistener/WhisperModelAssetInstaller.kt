@@ -11,10 +11,13 @@ object WhisperModelAssetInstaller {
 
     @JvmStatic
     fun getBundledModelAssetName(context: Context): String? {
-        return context.assets.list(ASSET_MODELS_DIR)
+        val candidates = context.assets.list(ASSET_MODELS_DIR)
             ?.filter { it.endsWith(".gguf", ignoreCase = true) }
             ?.sorted()
-            ?.firstOrNull()
+            .orEmpty()
+        return candidates.firstOrNull {
+            it.equals(WhisperModelManager.DEFAULT_MODEL_NAME, ignoreCase = true)
+        } ?: candidates.firstOrNull()
     }
 
     @JvmStatic

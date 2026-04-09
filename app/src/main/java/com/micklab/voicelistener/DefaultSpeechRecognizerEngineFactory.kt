@@ -6,7 +6,7 @@ class DefaultSpeechRecognizerEngineFactory : SpeechRecognizerEngineFactory {
             EngineType.VOSK -> VoskEngine(config.modelPath)
             EngineType.WHISPER -> WhisperEngine(
                 sampleRateHz = config.sampleRateHz,
-                language = config.language,
+                language = SpeechRecognizerConfig.normalizeWhisperLanguage(config.language),
                 threadCount = config.threadCount
             ).apply {
                 loadModel(config.modelPath)

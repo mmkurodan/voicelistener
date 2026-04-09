@@ -580,7 +580,7 @@ public class VoiceListenerService extends Service {
             EngineType.WHISPER,
             modelFile.getAbsolutePath(),
             SAMPLE_RATE_HZ,
-            "ja",
+            SpeechRecognizerConfig.defaultWhisperLanguage(),
             SpeechRecognizerConfig.defaultThreadCount()
         );
         logWhisperTrace(

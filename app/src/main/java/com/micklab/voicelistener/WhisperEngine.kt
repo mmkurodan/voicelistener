@@ -13,9 +13,12 @@ import java.util.concurrent.locks.ReentrantLock
 
 class WhisperEngine @JvmOverloads constructor(
     private val sampleRateHz: Int = 16_000,
-    private val language: String = "ja",
+    language: String = SpeechRecognizerConfig.defaultWhisperLanguage(),
     private val threadCount: Int = SpeechRecognizerConfig.defaultThreadCount()
 ) : SpeechRecognizerEngine {
+    private val language = SpeechRecognizerConfig.normalizeWhisperLanguage(language)
+    private val inferenceWindowSamples =
+        SpeechRecognizerConfig.whisperInferenceWindowSamples(sampleRateHz, this.language)
     private val lock = ReentrantLock()
     private val inferenceExecutor = ThreadPoolExecutor(
         1,
@@ -44,7 +47,7 @@ class WhisperEngine @JvmOverloads constructor(
             if (nativeHandle != 0L && loadedModelPath == modelPath) {
                 logWhisperPerf(
                     "engine.load.reuse",
-                    "path=$modelPath lockWaitMs=$lockWaitMs sampleRateHz=$sampleRateHz language=$language threadCount=$threadCount"
+                    "path=$modelPath lockWaitMs=$lockWaitMs sampleRateHz=$sampleRateHz language=$language threadCount=$threadCount inferenceWindowSamples=$inferenceWindowSamples"
                 )
                 return
             }
@@ -64,7 +67,7 @@ class WhisperEngine @JvmOverloads constructor(
             }
             logWhisperPerf(
                 "engine.load",
-                "path=$modelPath sampleRateHz=$sampleRateHz language=$language threadCount=$threadCount lockWaitMs=$lockWaitMs nativeLoadMs=$nativeLoadMs replacedHandle=${previousHandle != 0L}"
+                "path=$modelPath sampleRateHz=$sampleRateHz language=$language threadCount=$threadCount inferenceWindowSamples=$inferenceWindowSamples lockWaitMs=$lockWaitMs nativeLoadMs=$nativeLoadMs replacedHandle=${previousHandle != 0L}"
             )
             Log.i(TAG, "Whisper model loaded: $modelPath")
         }
@@ -105,7 +108,7 @@ class WhisperEngine @JvmOverloads constructor(
             logWhisperPerfTrace(
                 traceId,
                 "engine.chunk.submit",
-                "submittedAtMs=$submittedAtMs chunkSamples=${buffer.size} chunkMs=${samplesToMillis(buffer.size)} queueLength=$queueLength pendingSamples=$pendingSampleCount"
+                "submittedAtMs=$submittedAtMs chunkSamples=${buffer.size} chunkMs=${samplesToMillis(buffer.size)} queueLength=$queueLength pendingSamples=$pendingSampleCount inferenceWindowSamples=$inferenceWindowSamples"
             )
 
             val batchStartedNs = System.nanoTime()
@@ -193,8 +196,8 @@ class WhisperEngine @JvmOverloads constructor(
         appendStreamingChunks(buffer)
         val recognizedParts = ArrayList<String>()
         var nativeCalls = 0
-        while (pendingSampleCount >= INFERENCE_WINDOW_SAMPLES) {
-            val nextChunk = drainPendingSamples(INFERENCE_WINDOW_SAMPLES, force = false) ?: break
+        while (pendingSampleCount >= inferenceWindowSamples) {
+            val nextChunk = drainPendingSamples(inferenceWindowSamples, force = false) ?: break
             val result = runInferenceChunk(nextChunk, traceId, queueLength, flush = false)
             nativeCalls++
             if (result.isNotBlank()) {
@@ -215,7 +218,7 @@ class WhisperEngine @JvmOverloads constructor(
         val recognizedParts = ArrayList<String>()
         var nativeCalls = 0
         while (pendingSampleCount > 0) {
-            val nextChunk = drainPendingSamples(INFERENCE_WINDOW_SAMPLES, force = true) ?: break
+            val nextChunk = drainPendingSamples(inferenceWindowSamples, force = true) ?: break
             val result = runInferenceChunk(nextChunk, traceId, queueLength, flush = true)
             nativeCalls++
             if (result.isNotBlank()) {
@@ -254,7 +257,7 @@ class WhisperEngine @JvmOverloads constructor(
         logWhisperPerfTrace(
             traceId,
             "engine.chunk.begin",
-            "startedAtMs=$startedAtMs chunkSamples=${chunk.size} chunkMs=${samplesToMillis(chunk.size)} preparedSamples=${preparedChunk.size} preparedMs=${samplesToMillis(preparedChunk.size)} queueLength=$queueLength pendingSamples=$pendingSampleCount retrySamples=${retryBuffer.pendingSampleCount()} flush=$flush"
+            "startedAtMs=$startedAtMs chunkSamples=${chunk.size} chunkMs=${samplesToMillis(chunk.size)} preparedSamples=${preparedChunk.size} preparedMs=${samplesToMillis(preparedChunk.size)} queueLength=$queueLength pendingSamples=$pendingSampleCount retrySamples=${retryBuffer.pendingSampleCount()} inferenceWindowSamples=$inferenceWindowSamples flush=$flush"
         )
 
         val nativeStartedNs = System.nanoTime()
@@ -275,7 +278,7 @@ class WhisperEngine @JvmOverloads constructor(
         logWhisperPerfTrace(
             traceId,
             "engine.chunk.end",
-            "startedAtMs=$startedAtMs finishedAtMs=$finishedAtMs chunkSamples=${chunk.size} preparedSamples=${preparedChunk.size} chars=${result.length} inferMs=$nativeMs queueLength=$queueLength pendingSamples=$pendingSampleCount retrySamples=${retryBuffer.pendingSampleCount()} flush=$flush"
+            "startedAtMs=$startedAtMs finishedAtMs=$finishedAtMs chunkSamples=${chunk.size} preparedSamples=${preparedChunk.size} chars=${result.length} inferMs=$nativeMs queueLength=$queueLength pendingSamples=$pendingSampleCount retrySamples=${retryBuffer.pendingSampleCount()} inferenceWindowSamples=$inferenceWindowSamples flush=$flush"
         )
         return result
     }
@@ -391,7 +394,6 @@ class WhisperEngine @JvmOverloads constructor(
         private const val TAG = "WhisperEngine"
         private const val INFERENCE_THREAD_NAME = "WhisperInferenceThread"
         private const val STREAM_INPUT_SAMPLES = 1_024
-        private const val INFERENCE_WINDOW_SAMPLES = 4_096
         private const val RETRY_RETAIN_SAMPLES = 2_048
 
         init {

@@ -443,6 +443,23 @@ Java_com_micklab_voicelistener_WhisperEngine_nativeTranscribe(
     const long long extract_ms = elapsed_ms(extract_started_at, extract_finished_at);
 
     transcription = trim_copy(transcription);
+    std::string resolved_language = language_value;
+    std::string resolved_language_name;
+    if (full_params.detect_language) {
+        const int resolved_language_id = whisper_full_lang_id(handle->context);
+        if (resolved_language_id >= 0 && resolved_language_id <= whisper_lang_max_id()) {
+            const char * resolved_language_code = whisper_lang_str(resolved_language_id);
+            const char * resolved_language_label = whisper_lang_str_full(resolved_language_id);
+            if (resolved_language_code != nullptr && *resolved_language_code != '\0') {
+                resolved_language = resolved_language_code;
+            }
+            if (resolved_language_label != nullptr && *resolved_language_label != '\0') {
+                resolved_language_name = resolved_language_label;
+            }
+        } else {
+            resolved_language = "unknown";
+        }
+    }
     const auto total_finished_at = std::chrono::steady_clock::now();
     const long long total_ms = elapsed_ms(total_started_at, total_finished_at);
     const long long finished_at_ms = now_epoch_ms();
@@ -468,6 +485,10 @@ Java_com_micklab_voicelistener_WhisperEngine_nativeTranscribe(
             + " totalMs=" + std::to_string(total_ms)
             + " segments=" + std::to_string(segment_count)
             + " chars=" + std::to_string(transcription.size())
+            + " resolvedLanguage=" + resolved_language
+            + (resolved_language_name.empty()
+                ? std::string("")
+                : std::string(" resolvedLanguageName=") + resolved_language_name)
             + " detectLanguage=" + std::string(full_params.detect_language ? "true" : "false")
     );
     return env->NewStringUTF(transcription.c_str());

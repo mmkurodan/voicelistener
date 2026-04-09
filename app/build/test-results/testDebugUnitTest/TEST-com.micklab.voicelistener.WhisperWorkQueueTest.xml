@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuite name="com.micklab.voicelistener.WhisperWorkQueueTest" tests="4" skipped="0" failures="0" errors="0" timestamp="2026-04-08T23:31:01" hostname="localhost" time="0.002">
+  <properties/>
+  <testcase name="offer_schedulesSingleWorkerUntilPendingAudioIsDrained" classname="com.micklab.voicelistener.WhisperWorkQueueTest" time="0.001"/>
+  <testcase name="pollNextWork_defersFlushUntilBufferedAudioFitsSingleBatch" classname="com.micklab.voicelistener.WhisperWorkQueueTest" time="0.0"/>
+  <testcase name="pollNextWork_returnsFlushOnlyWorkWhenNoAudioRemains" classname="com.micklab.voicelistener.WhisperWorkQueueTest" time="0.0"/>
+  <testcase name="pollNextWork_dropsOldestSamplesWhenPendingAudioOverflows" classname="com.micklab.voicelistener.WhisperWorkQueueTest" time="0.0"/>
+  <system-out><![CDATA[]]></system-out>
+  <system-err><![CDATA[]]></system-err>
+</testsuite>

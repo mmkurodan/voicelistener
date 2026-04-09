@@ -9,6 +9,7 @@ class SpeechRecognizerFacade @JvmOverloads constructor(
 ) {
     private val lock = ReentrantLock()
     private var currentEngine: SpeechRecognizerEngine = NoOpSpeechRecognizerEngine()
+    @Volatile
     private var currentEngineType: EngineType? = null
     private var started = false
 
@@ -25,9 +26,9 @@ class SpeechRecognizerFacade @JvmOverloads constructor(
         }
     }
 
-    fun hasActiveEngine(): Boolean = lock.withLock { currentEngineType != null }
+    fun hasActiveEngine(): Boolean = currentEngineType != null
 
-    fun currentEngineType(): EngineType? = lock.withLock { currentEngineType }
+    fun currentEngineType(): EngineType? = currentEngineType
 
     override fun toString(): String = lock.withLock {
         "SpeechRecognizerFacade(engineType=$currentEngineType, started=$started)"

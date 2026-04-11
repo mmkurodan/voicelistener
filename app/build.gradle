@@ -4,7 +4,6 @@ apply plugin: 'org.jetbrains.kotlin.android'
 android {
     namespace "com.micklab.voicelistener"
     compileSdk 34
-    ndkVersion "26.3.11579264"
 
     defaultConfig {
         applicationId "com.micklab.voicelistener"
@@ -12,13 +11,6 @@ android {
         targetSdk 34
         versionCode 1
         versionName "1.0"
-
-        externalNativeBuild {
-            cmake {
-                arguments "-DANDROID_STL=c++_shared"
-                cppFlags "-std=c++17"
-            }
-        }
     }
 
     compileOptions {
@@ -33,13 +25,6 @@ android {
     buildTypes {
         release {
             minifyEnabled false
-        }
-    }
-
-    externalNativeBuild {
-        cmake {
-            path file('CMakeLists.txt')
-            version '3.22.1'
         }
     }
 }

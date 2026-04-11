@@ -78,35 +78,25 @@ public class MainActivity extends Activity {
 
     private Spinner modelSpinner;
     private ArrayAdapter<String> modelSpinnerAdapter;
-    private Spinner whisperModelSpinner;
-    private ArrayAdapter<String> whisperModelSpinnerAdapter;
-    private Spinner engineSpinner;
-    private ArrayAdapter<String> engineSpinnerAdapter;
     private TextView recognizerStatusText;
-    private TextView whisperModelStatusText;
     private ProgressBar modelDownloadProgressBar;
     private TextView modelDownloadProgressText;
-    private ProgressBar whisperModelDownloadProgressBar;
-    private TextView whisperModelDownloadProgressText;
     private SeekBar volumeIndicatorSeekBar;
     private TextView volumeIndicatorLabel;
     private LinearLayout voskModelSection;
-    private LinearLayout whisperModelSection;
-    private EditText whisperModelUrlInput;
     private boolean wasModelDownloadActive = false;
-    private boolean wasWhisperModelDownloadActive = false;
     private EditText ollamaBaseUrlInput;
     private Spinner ollamaModelSpinner;
     private ArrayAdapter<String> ollamaModelSpinnerAdapter;
+    private Spinner summaryModeSpinner;
+    private ArrayAdapter<String> summaryModeSpinnerAdapter;
     private EditText summaryForceCharsInput;
     private TextView summaryStatusText;
     private ExecutorService ollamaExecutor;
-    private ExecutorService backgroundExecutor;
     private final OllamaClient ollamaClient = new OllamaClient();
     private final SimpleDateFormat summaryTimeFormat = new SimpleDateFormat("HH:mm:ss", Locale.JAPAN);
     private boolean suppressOllamaSelectionCallback = false;
-    private boolean suppressEngineSelectionCallback = false;
-    private volatile boolean whisperModelPreparationInProgress = false;
+    private boolean suppressSummaryModeSelectionCallback = false;
     
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -115,7 +105,6 @@ public class MainActivity extends Activity {
         logManager = new LogManager2(this);
         prefs = getSharedPreferences("VoiceListenerPrefs", MODE_PRIVATE);
         ollamaExecutor = Executors.newSingleThreadExecutor();
-        backgroundExecutor = Executors.newSingleThreadExecutor();
         
         createUI();
         checkPermissions();
@@ -133,151 +122,10 @@ public class MainActivity extends Activity {
         statusText.setPadding(0, 0, 0, 10);
         layout.addView(statusText);
 
-        TextView recognizerLabel = new TextView(this);
-        recognizerLabel.setText("認識エンジン:");
-        recognizerLabel.setPadding(0, 6, 0, 6);
-        layout.addView(recognizerLabel);
-
-        engineSpinner = new Spinner(this);
-        engineSpinnerAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, new ArrayList<>());
-        engineSpinnerAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        engineSpinnerAdapter.add(EngineType.VOSK.name());
-        engineSpinnerAdapter.add(EngineType.WHISPER.name());
-        engineSpinner.setAdapter(engineSpinnerAdapter);
-        engineSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
-            @Override
-            public void onItemSelected(AdapterView<?> parent, android.view.View view, int position, long id) {
-                if (suppressEngineSelectionCallback) {
-                    return;
-                }
-                saveRecognizerSettingsFromInputs();
-                updateRecognizerUiState();
-                if (getSelectedEngineType() == EngineType.WHISPER) {
-                    ensureWhisperModelReadyAsync(false);
-                }
-            }
-
-            @Override
-            public void onNothingSelected(AdapterView<?> parent) {
-            }
-        });
-        layout.addView(engineSpinner);
-
         recognizerStatusText = new TextView(this);
         recognizerStatusText.setPadding(0, 8, 0, 6);
         layout.addView(recognizerStatusText);
-
-        Button applyEngineButton = new Button(this);
-        applyEngineButton.setText("選択エンジンを反映");
-        applyEngineButton.setOnClickListener(v -> applyRecognizerSelection());
-        layout.addView(applyEngineButton);
-
-        whisperModelSection = new LinearLayout(this);
-        whisperModelSection.setOrientation(LinearLayout.VERTICAL);
-        layout.addView(whisperModelSection);
-
-        TextView whisperSectionLabel = new TextView(this);
-        whisperSectionLabel.setText("Whisper モデル");
-        whisperSectionLabel.setTextSize(16);
-        whisperSectionLabel.setPadding(0, 18, 0, 8);
-        whisperModelSection.addView(whisperSectionLabel);
-
-        whisperModelUrlInput = new EditText(this);
-        whisperModelUrlInput.setHint("Whisper .gguf のURLを入力 (例: https://...)");
-        whisperModelUrlInput.setText(WhisperModelManager.DEFAULT_MODEL_URL);
-        whisperModelSection.addView(whisperModelUrlInput);
-
-        Button replaceWhisperModelButton = new Button(this);
-        replaceWhisperModelButton.setText("Whisperモデルロード/再DL");
-        replaceWhisperModelButton.setOnClickListener(v -> {
-            String url = whisperModelUrlInput.getText().toString().trim();
-            try {
-                WhisperModelManager.deriveModelNameFromUrl(url);
-            } catch (IllegalArgumentException e) {
-                Toast.makeText(this, "WhisperモデルURLが不正です: " + e.getMessage(), Toast.LENGTH_LONG).show();
-                return;
-            }
-            Intent intent = new Intent(this, VoiceListenerService.class);
-            intent.setAction(VoiceListenerService.ACTION_INSTALL_MODEL);
-            intent.putExtra(VoiceListenerService.EXTRA_ENGINE_TYPE, EngineType.WHISPER.name());
-            intent.putExtra(VoiceListenerService.EXTRA_MODEL_URL, url);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent);
-            } else {
-                startService(intent);
-            }
-            Toast.makeText(this, "Whisperモデルロードを開始しました", Toast.LENGTH_SHORT).show();
-        });
-        whisperModelSection.addView(replaceWhisperModelButton);
-
-        whisperModelDownloadProgressText = new TextView(this);
-        whisperModelDownloadProgressText.setText("WhisperモデルDL進捗: 待機中");
-        whisperModelDownloadProgressText.setPadding(0, 6, 0, 6);
-        whisperModelSection.addView(whisperModelDownloadProgressText);
-
-        whisperModelDownloadProgressBar = new ProgressBar(this, null, android.R.attr.progressBarStyleHorizontal);
-        whisperModelDownloadProgressBar.setMax(100);
-        whisperModelDownloadProgressBar.setProgress(0);
-        whisperModelSection.addView(whisperModelDownloadProgressBar);
-
-        TextView whisperModelSelectLabel = new TextView(this);
-        whisperModelSelectLabel.setText("ダウンロード済みWhisperモデル:");
-        whisperModelSelectLabel.setPadding(0, 14, 0, 6);
-        whisperModelSection.addView(whisperModelSelectLabel);
-
-        whisperModelSpinner = new Spinner(this);
-        whisperModelSpinnerAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, new ArrayList<>());
-        whisperModelSpinnerAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
-        whisperModelSpinner.setAdapter(whisperModelSpinnerAdapter);
-        whisperModelSection.addView(whisperModelSpinner);
-
-        Button switchWhisperModelButton = new Button(this);
-        switchWhisperModelButton.setText("選択Whisperモデルへ切替");
-        switchWhisperModelButton.setOnClickListener(v -> {
-            String modelName = getSelectedWhisperModelName();
-            if (modelName == null) {
-                Toast.makeText(this, "切替対象のWhisperモデルがありません", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            Intent intent = new Intent(this, VoiceListenerService.class);
-            intent.setAction(VoiceListenerService.ACTION_SELECT_MODEL);
-            intent.putExtra(VoiceListenerService.EXTRA_ENGINE_TYPE, EngineType.WHISPER.name());
-            intent.putExtra(VoiceListenerService.EXTRA_MODEL_NAME, modelName);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent);
-            } else {
-                startService(intent);
-            }
-            Toast.makeText(this, "Whisperモデル切替を要求しました: " + modelName, Toast.LENGTH_SHORT).show();
-        });
-        whisperModelSection.addView(switchWhisperModelButton);
-
-        Button deleteWhisperModelButton = new Button(this);
-        deleteWhisperModelButton.setText("選択Whisperモデル削除");
-        deleteWhisperModelButton.setOnClickListener(v -> {
-            String modelName = getSelectedWhisperModelName();
-            if (modelName == null) {
-                Toast.makeText(this, "削除対象のWhisperモデルがありません", Toast.LENGTH_SHORT).show();
-                return;
-            }
-            Intent intent = new Intent(this, VoiceListenerService.class);
-            intent.setAction(VoiceListenerService.ACTION_DELETE_MODEL);
-            intent.putExtra(VoiceListenerService.EXTRA_ENGINE_TYPE, EngineType.WHISPER.name());
-            intent.putExtra(VoiceListenerService.EXTRA_MODEL_NAME, modelName);
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                startForegroundService(intent);
-            } else {
-                startService(intent);
-            }
-            Toast.makeText(this, "Whisperモデル削除を要求しました: " + modelName, Toast.LENGTH_SHORT).show();
-            if (uiHandler == null) uiHandler = new Handler(Looper.getMainLooper());
-            uiHandler.postDelayed(() -> refreshWhisperModelSpinner(true), 500);
-        });
-        whisperModelSection.addView(deleteWhisperModelButton);
-
-        whisperModelStatusText = new TextView(this);
-        whisperModelStatusText.setPadding(0, 4, 0, 12);
-        whisperModelSection.addView(whisperModelStatusText);
+        recognizerStatusText.setText("認識エンジン: VOSK 固定");
          
         // VAD閾値スライダー + 音量インジケータ（同縮尺）
         float savedThreshold = prefs.getFloat("rms_threshold", 900.0f);
@@ -497,6 +345,34 @@ public class MainActivity extends Activity {
         });
         layout.addView(ollamaModelSpinner);
 
+        TextView summaryModeLabel = new TextView(this);
+        summaryModeLabel.setText("要約更新モード:");
+        summaryModeLabel.setPadding(0, 10, 0, 6);
+        layout.addView(summaryModeLabel);
+
+        summaryModeSpinner = new Spinner(this);
+        summaryModeSpinnerAdapter = new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, new ArrayList<>());
+        summaryModeSpinnerAdapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        for (SummaryUpdateMode mode : SummaryUpdateMode.values()) {
+            summaryModeSpinnerAdapter.add(mode.getDisplayName());
+        }
+        summaryModeSpinner.setAdapter(summaryModeSpinnerAdapter);
+        summaryModeSpinner.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, android.view.View view, int position, long id) {
+                if (suppressSummaryModeSelectionCallback || summaryModeSpinner.getSelectedItem() == null) {
+                    return;
+                }
+                saveSummaryUpdateModeFromInput();
+                updateSummaryDisplay();
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+            }
+        });
+        layout.addView(summaryModeSpinner);
+
         TextView summaryThresholdLabel = new TextView(this);
         summaryThresholdLabel.setText("強制要約文字数:");
         summaryThresholdLabel.setPadding(0, 10, 0, 6);
@@ -566,15 +442,11 @@ public class MainActivity extends Activity {
         layout.addView(logContentText);
 
         refreshModelSpinner(false);
-        refreshWhisperModelSpinner(false);
         refreshOllamaModelSpinner(false);
         syncRecognizerSettingsInputs();
         updateDownloadProgressIndicator();
-        updateWhisperDownloadProgressIndicator();
         updateVolumeIndicator();
         updateSummaryDisplay();
-        refreshWhisperModelStatus();
-        ensureWhisperModelReadyAsync(false);
 
         ScrollView rootScrollView = new ScrollView(this);
         rootScrollView.setFillViewport(true);
@@ -720,16 +592,6 @@ public class MainActivity extends Activity {
         }
 
         saveRecognizerSettingsFromInputs();
-        if (getSelectedEngineType() == EngineType.WHISPER && !WhisperModelManager.hasAnyModelSource(this)) {
-            String msg = "Whisperモデルが未準備です。URLから .gguf をダウンロードするか、assets/models/ に .gguf を追加してください。";
-            logManager.writeLog(msg);
-            statusText.setText("ステータス: " + msg);
-            Toast.makeText(this, msg, Toast.LENGTH_LONG).show();
-            return;
-        }
-        if (getSelectedEngineType() == EngineType.WHISPER) {
-            ensureWhisperModelReadyAsync(false);
-        }
         saveSummarySettingsFromInputs();
         String selectedOllamaModel = getSelectedOllamaModelName();
         if (selectedOllamaModel != null) {
@@ -815,14 +677,6 @@ public class MainActivity extends Activity {
         return selected.isEmpty() ? null : selected;
     }
 
-    private String getSelectedWhisperModelName() {
-        if (whisperModelSpinner == null || whisperModelSpinner.getSelectedItem() == null) {
-            return null;
-        }
-        String selected = String.valueOf(whisperModelSpinner.getSelectedItem()).trim();
-        return selected.isEmpty() ? null : selected;
-    }
-
     private String getSelectedOllamaModelName() {
         if (ollamaModelSpinner == null || ollamaModelSpinner.getSelectedItem() == null) {
             return null;
@@ -857,24 +711,6 @@ public class MainActivity extends Activity {
         if (!modelNames.isEmpty()) {
             int index = selectedBefore != null ? modelNames.indexOf(selectedBefore) : -1;
             modelSpinner.setSelection(index >= 0 ? index : 0);
-        }
-    }
-
-    private void refreshWhisperModelSpinner(boolean keepSelection) {
-        if (whisperModelSpinnerAdapter == null || whisperModelSpinner == null) return;
-
-        String selectedBefore = keepSelection ? getSelectedWhisperModelName() : null;
-        String savedModel = WhisperModelManager.getSelectedModelName(this);
-        ArrayList<String> modelNames = new ArrayList<>(WhisperModelManager.listDownloadedModelNames(this));
-
-        whisperModelSpinnerAdapter.clear();
-        whisperModelSpinnerAdapter.addAll(modelNames);
-        whisperModelSpinnerAdapter.notifyDataSetChanged();
-
-        if (!modelNames.isEmpty()) {
-            String target = selectedBefore != null ? selectedBefore : savedModel;
-            int index = target != null ? modelNames.indexOf(target) : -1;
-            whisperModelSpinner.setSelection(index >= 0 ? index : 0);
         }
     }
 
@@ -920,13 +756,27 @@ public class MainActivity extends Activity {
         summaryForceCharsInput.setText(String.valueOf(LiveSummaryStore.getSummaryForceCharThreshold(this)));
     }
 
+    private void saveSummaryUpdateModeFromInput() {
+        if (summaryModeSpinner == null) {
+            LiveSummaryStore.setSummaryUpdateMode(this, SummaryUpdateMode.AUTO);
+            return;
+        }
+        SummaryUpdateMode[] modes = SummaryUpdateMode.values();
+        int position = summaryModeSpinner.getSelectedItemPosition();
+        SummaryUpdateMode mode = position >= 0 && position < modes.length
+            ? modes[position]
+            : SummaryUpdateMode.AUTO;
+        LiveSummaryStore.setSummaryUpdateMode(this, mode);
+    }
+
     private void saveSummarySettingsFromInputs() {
         saveOllamaBaseUrlFromInput();
+        saveSummaryUpdateModeFromInput();
         saveSummaryForceCharsFromInput();
     }
 
     private void saveRecognizerSettingsFromInputs() {
-        SpeechRecognitionPreferences.setActiveEngine(this, getSelectedEngineType());
+        SpeechRecognitionPreferences.setActiveEngine(this, EngineType.VOSK);
     }
 
     private void syncSummarySettingsInputs() {
@@ -936,177 +786,30 @@ public class MainActivity extends Activity {
         if (ollamaBaseUrlInput != null) {
             ollamaBaseUrlInput.setText(LiveSummaryStore.getOllamaBaseUrl(this));
         }
+        if (summaryModeSpinnerAdapter != null && summaryModeSpinner != null) {
+            SummaryUpdateMode mode = LiveSummaryStore.getSummaryUpdateMode(this);
+            suppressSummaryModeSelectionCallback = true;
+            summaryModeSpinner.setSelection(mode.ordinal());
+            suppressSummaryModeSelectionCallback = false;
+        }
     }
 
     private void syncRecognizerSettingsInputs() {
-        if (engineSpinnerAdapter == null || engineSpinner == null) {
-            return;
-        }
-        EngineType activeEngine = SpeechRecognitionPreferences.getActiveEngine(this);
-        int index = engineSpinnerAdapter.getPosition(activeEngine.name());
-        suppressEngineSelectionCallback = true;
-        if (index >= 0) {
-            engineSpinner.setSelection(index);
-        }
-        suppressEngineSelectionCallback = false;
+        saveRecognizerSettingsFromInputs();
         updateRecognizerUiState();
     }
 
     private EngineType getSelectedEngineType() {
-        if (engineSpinner == null || engineSpinner.getSelectedItem() == null) {
-            return SpeechRecognitionPreferences.getActiveEngine(this);
-        }
-        return EngineType.fromPreference(String.valueOf(engineSpinner.getSelectedItem()));
+        return EngineType.VOSK;
     }
 
     private void updateRecognizerUiState() {
-        EngineType selectedEngine = getSelectedEngineType();
-        boolean whisperSelected = selectedEngine == EngineType.WHISPER;
         if (recognizerStatusText != null) {
-            recognizerStatusText.setText("現在の認識エンジン設定: " + selectedEngine.getDisplayName());
+            recognizerStatusText.setText("現在の認識エンジン設定: " + EngineType.VOSK.getDisplayName());
         }
         if (voskModelSection != null) {
-            voskModelSection.setVisibility(whisperSelected ? View.GONE : View.VISIBLE);
+            voskModelSection.setVisibility(View.VISIBLE);
         }
-        if (whisperModelSection != null) {
-            whisperModelSection.setVisibility(whisperSelected ? View.VISIBLE : View.GONE);
-        }
-        refreshWhisperModelStatus();
-    }
-
-    private void applyRecognizerSelection() {
-        saveRecognizerSettingsFromInputs();
-        updateRecognizerUiState();
-        if (getSelectedEngineType() == EngineType.WHISPER) {
-            if (!WhisperModelManager.hasAnyModelSource(this)) {
-                Toast.makeText(this, "Whisperモデルが未準備です。URLから .gguf を取得するか、assets/models/ に .gguf を追加してください。", Toast.LENGTH_LONG).show();
-                return;
-            }
-            ensureWhisperModelReadyAsync(false);
-        }
-        if (!isServiceRunning) {
-            Toast.makeText(this, "認識エンジン設定を保存しました", Toast.LENGTH_SHORT).show();
-            updateStatusFromPrefs();
-            return;
-        }
-
-        Intent intent = new Intent(this, VoiceListenerService.class);
-        intent.setAction(VoiceListenerService.ACTION_REFRESH_RECOGNIZER);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(intent);
-        } else {
-            startService(intent);
-        }
-        Toast.makeText(this, "認識エンジン切替を要求しました", Toast.LENGTH_SHORT).show();
-    }
-
-    private void refreshWhisperModelStatus() {
-        if (whisperModelStatusText == null) {
-            return;
-        }
-        if (whisperModelPreparationInProgress) {
-            whisperModelStatusText.setText("Whisperモデル: 内部ストレージへコピー中...");
-            return;
-        }
-
-        String selectedModelName = WhisperModelManager.getSelectedModelName(this);
-        File selectedModel = WhisperModelManager.resolveSelectedDownloadedModelFile(this);
-        if (selectedModel != null) {
-            whisperModelStatusText.setText("Whisperモデル: " + selectedModel.getName() + " (ダウンロード済み / 選択中)");
-            return;
-        }
-
-        File preferredDownloadedModel = WhisperModelManager.resolvePreferredDownloadedModelFile(this);
-        if (preferredDownloadedModel != null) {
-            if (selectedModelName != null) {
-                whisperModelStatusText.setText("Whisperモデル: " + selectedModelName + " は見つかりません。代わりに " + preferredDownloadedModel.getName() + " を利用可能です");
-            } else {
-                whisperModelStatusText.setText("Whisperモデル: " + preferredDownloadedModel.getName() + " (ダウンロード済み)");
-            }
-            return;
-        }
-
-        String assetName = WhisperModelAssetInstaller.getBundledModelAssetName(this);
-        File installedModel = WhisperModelAssetInstaller.getInstalledModelFile(this);
-        if (installedModel != null) {
-            whisperModelStatusText.setText("Whisperモデル: " + installedModel.getName() + " (assets/models 由来 / 準備済み)");
-        } else if (assetName != null) {
-            whisperModelStatusText.setText("Whisperモデル: " + assetName + " (assets/models 由来 / 未コピー)");
-        } else {
-            whisperModelStatusText.setText("Whisperモデル: 未ダウンロード。URLから .gguf を取得してください");
-        }
-    }
-
-    private void ensureWhisperModelReadyAsync(boolean announceResult) {
-        if (backgroundExecutor == null || whisperModelPreparationInProgress) {
-            refreshWhisperModelStatus();
-            return;
-        }
-        if (WhisperModelManager.resolvePreferredDownloadedModelFile(this) != null
-            || WhisperModelAssetInstaller.getInstalledModelFile(this) != null
-            || !WhisperModelAssetInstaller.hasBundledModel(this)) {
-            refreshWhisperModelStatus();
-            return;
-        }
-
-        whisperModelPreparationInProgress = true;
-        refreshWhisperModelStatus();
-        backgroundExecutor.execute(() -> {
-            File preparedModel = null;
-            Exception failure = null;
-            try {
-                preparedModel = WhisperModelAssetInstaller.ensureBundledModelCopied(this);
-            } catch (Exception e) {
-                failure = e;
-            }
-
-            File resultModel = preparedModel;
-            Exception resultFailure = failure;
-            runOnUiThread(() -> {
-                whisperModelPreparationInProgress = false;
-                refreshWhisperModelStatus();
-                if (announceResult) {
-                    if (resultFailure != null) {
-                        Toast.makeText(this, "Whisperモデル準備失敗: " + resultFailure.getMessage(), Toast.LENGTH_LONG).show();
-                    } else if (resultModel != null) {
-                        Toast.makeText(this, "Whisperモデルを準備しました: " + resultModel.getName(), Toast.LENGTH_SHORT).show();
-                    }
-                }
-            });
-        });
-    }
-
-    private void updateWhisperDownloadProgressIndicator() {
-        if (whisperModelDownloadProgressBar == null || whisperModelDownloadProgressText == null) return;
-        boolean active = prefs.getBoolean(WhisperModelManager.PREF_MODEL_DOWNLOAD_ACTIVE, false);
-        int progress = prefs.getInt(WhisperModelManager.PREF_MODEL_DOWNLOAD_PROGRESS, 0);
-        String modelName = prefs.getString(WhisperModelManager.PREF_MODEL_DOWNLOAD_NAME, "");
-
-        if (active) {
-            if (progress < 0) {
-                whisperModelDownloadProgressBar.setIndeterminate(true);
-                whisperModelDownloadProgressText.setText("WhisperモデルDL中: " + modelName);
-            } else {
-                int safeProgress = Math.max(0, Math.min(progress, 100));
-                whisperModelDownloadProgressBar.setIndeterminate(false);
-                whisperModelDownloadProgressBar.setProgress(safeProgress);
-                whisperModelDownloadProgressText.setText("WhisperモデルDL中 (" + modelName + "): " + safeProgress + "%");
-            }
-        } else {
-            int safeProgress = Math.max(0, Math.min(progress, 100));
-            whisperModelDownloadProgressBar.setIndeterminate(false);
-            whisperModelDownloadProgressBar.setProgress(safeProgress);
-            if (safeProgress >= 100 && modelName != null && !modelName.isEmpty()) {
-                whisperModelDownloadProgressText.setText("WhisperモデルDL完了: " + modelName);
-            } else {
-                whisperModelDownloadProgressText.setText("WhisperモデルDL進捗: 待機中");
-            }
-        }
-        if (wasWhisperModelDownloadActive && !active) {
-            refreshWhisperModelSpinner(true);
-            refreshWhisperModelStatus();
-        }
-        wasWhisperModelDownloadActive = active;
     }
 
     private void ensureOllamaExecutor() {
@@ -1175,6 +878,7 @@ public class MainActivity extends Activity {
             return;
         }
         LiveSummaryState state = LiveSummaryStore.loadSummaryState(this);
+        SummaryUpdateMode updateMode = LiveSummaryStore.getSummaryUpdateMode(this);
         String status = state.getStatus().isEmpty() ? "要約待機中" : state.getStatus();
         int pendingChars = LiveSummaryStore.getPendingSummaryLogCharCount(this);
         if (pendingChars > 0) {
@@ -1183,7 +887,7 @@ public class MainActivity extends Activity {
         if (state.getUpdatedAtMillis() > 0L) {
             status = status + " (" + summaryTimeFormat.format(new java.util.Date(state.getUpdatedAtMillis())) + ")";
         }
-        summaryStatusText.setText("要約状態: " + status);
+        summaryStatusText.setText("要約モード: " + updateMode.getDisplayName() + " / 要約状態: " + status);
     }
 
     private void updateVolumeIndicator() {
@@ -1321,14 +1025,11 @@ public class MainActivity extends Activity {
         updateLogDisplay();
         updateStatusFromPrefs();
         refreshModelSpinner(true);
-        refreshWhisperModelSpinner(true);
         refreshOllamaModelSpinner(true);
         syncRecognizerSettingsInputs();
         syncSummarySettingsInputs();
         updateDownloadProgressIndicator();
-        updateWhisperDownloadProgressIndicator();
         updateVolumeIndicator();
-        refreshWhisperModelStatus();
         updateSummaryDisplay();
         // 定期更新を開始
         if (uiHandler == null) uiHandler = new Handler(Looper.getMainLooper());
@@ -1351,7 +1052,6 @@ public class MainActivity extends Activity {
                 public void run() {
                     try {
                         updateDownloadProgressIndicator();
-                        updateWhisperDownloadProgressIndicator();
                         updateVolumeIndicator();
                     } catch (Exception ignored) {}
                     uiHandler.postDelayed(this, INDICATOR_UPDATE_INTERVAL_MS);
@@ -1380,10 +1080,6 @@ public class MainActivity extends Activity {
         if (ollamaExecutor != null) {
             ollamaExecutor.shutdownNow();
             ollamaExecutor = null;
-        }
-        if (backgroundExecutor != null) {
-            backgroundExecutor.shutdownNow();
-            backgroundExecutor = null;
         }
     }
 }

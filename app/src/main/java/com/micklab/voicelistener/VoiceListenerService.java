@@ -36,7 +36,6 @@ import java.security.MessageDigest;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Locale;
-import java.util.concurrent.RejectedExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -45,7 +44,6 @@ import java.util.concurrent.ScheduledFuture;
 import java.util.concurrent.ThreadFactory;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
-import java.util.concurrent.atomic.AtomicLong;
 import java.util.zip.ZipEntry;
 import java.util.zip.ZipInputStream;
 import android.content.SharedPreferences;
@@ -59,17 +57,12 @@ public class VoiceListenerService extends Service {
     private static final int CHANNEL_CONFIG = AudioFormat.CHANNEL_IN_MONO;
     private static final int AUDIO_FORMAT = AudioFormat.ENCODING_PCM_16BIT;
     private static final int FRAME_SAMPLES = 1024;
-    private static final int VOSK_MAX_SILENCE_FRAMES = 15;
-    private static final int VOSK_MIN_SPEECH_FRAMES = 8;
-    private static final int VOSK_MAX_CONTINUOUS_SPEECH_FRAMES = 64;
-    private static final int WHISPER_MAX_SILENCE_FRAMES = 6;
-    private static final int WHISPER_MIN_SPEECH_FRAMES = 4;
-    private static final int WHISPER_MAX_CONTINUOUS_SPEECH_FRAMES = 20;
-    private static final int WHISPER_WORK_BATCH_SAMPLES = 4096;
-    private static final int WHISPER_MAX_PENDING_SAMPLES = SAMPLE_RATE_HZ * 4;
+    private static final int VOSK_MAX_SILENCE_FRAMES = 18;
+    private static final int VOSK_MIN_SPEECH_FRAMES = 10;
+    private static final int VOSK_MAX_CONTINUOUS_SPEECH_FRAMES = 96;
     private static final double RMS_THRESHOLD = 900.0;
     private static final long SUMMARY_DEBOUNCE_MS = 4000L;
-    private static final String TRANSCRIPTION_THREAD_NAME = "WhisperTranscriptionThread";
+    private static final String TRANSCRIPTION_THREAD_NAME = "VoskTranscriptionThread";
 
     private static final String LEGACY_VOSK_MODEL_FOLDER = "vosk-model-ja";
     private static final String MODELS_FOLDER = "models";
@@ -92,6 +85,7 @@ public class VoiceListenerService extends Service {
     public static final String ACTION_SELECT_MODEL = "com.micklab.voicelistener.action.SELECT_MODEL";
     public static final String ACTION_DELETE_MODEL = "com.micklab.voicelistener.action.DELETE_MODEL";
     public static final String ACTION_REFRESH_RECOGNIZER = "com.micklab.voicelistener.action.REFRESH_RECOGNIZER";
+    public static final String ACTION_REFRESH_SUMMARY = "com.micklab.voicelistener.action.REFRESH_SUMMARY";
     public static final String ACTION_STOP_MONITORING = "com.micklab.voicelistener.action.STOP_MONITORING";
     public static final String EXTRA_ENGINE_TYPE = "com.micklab.voicelistener.extra.ENGINE_TYPE";
     public static final String EXTRA_MODEL_URL = "com.micklab.voicelistener.extra.MODEL_URL";
@@ -107,9 +101,6 @@ public class VoiceListenerService extends Service {
     private SharedPreferences sharedPrefs;
     private SharedPreferences.OnSharedPreferenceChangeListener prefsListener;
     private final OllamaClient ollamaClient = new OllamaClient();
-    private final AtomicLong whisperTraceCounter = new AtomicLong(0L);
-    private final WhisperWorkQueue whisperWorkQueue =
-        new WhisperWorkQueue(WHISPER_WORK_BATCH_SAMPLES, WHISPER_MAX_PENDING_SAMPLES);
 
     private AudioRecord audioRecord;
     private NoiseSuppressor noiseSuppressor;
@@ -129,12 +120,11 @@ public class VoiceListenerService extends Service {
         Log.d(TAG, "VoiceListenerService created");
 
         logManager = new LogManager2(this);
-        WhisperPerfLogger.initialize(logManager);
 
         // VAD閾値は SharedPreferences から取得して初期化する
         sharedPrefs = getSharedPreferences(PREFS_NAME, MODE_PRIVATE);
         float prefThreshold = sharedPrefs.getFloat(PREF_RMS_THRESHOLD, (float) RMS_THRESHOLD);
-        vad = createVoiceActivityDetector(SpeechRecognitionPreferences.getActiveEngine(this), prefThreshold);
+        vad = createVoiceActivityDetector(prefThreshold);
 
         prefsListener = new SharedPreferences.OnSharedPreferenceChangeListener() {
             @Override
@@ -169,82 +159,36 @@ public class VoiceListenerService extends Service {
         // intent がモデルインストール要求または停止要求を含む場合は先に処理する
         String action = intent != null ? intent.getAction() : null;
         if (ACTION_INSTALL_MODEL.equals(action)) {
-            EngineType requestedEngineType = EngineType.fromPreference(intent != null ? intent.getStringExtra(EXTRA_ENGINE_TYPE) : null);
-            if (requestedEngineType == EngineType.WHISPER) {
-                installWhisperModelFromUrlAsync(
-                    intent != null ? intent.getStringExtra(EXTRA_MODEL_URL) : null,
-                    !isCapturing,
-                    true
-                );
-            } else {
-                String url = normalizeModelUrl(intent.getStringExtra(EXTRA_MODEL_URL));
-                File modelDir = getModelDirForUrl(url);
-                // 同一URLは常に削除して再ダウンロードする
-                installModelFromUrlAsync(modelDir, url, true, !isCapturing, true);
-            }
+            String url = normalizeModelUrl(intent != null ? intent.getStringExtra(EXTRA_MODEL_URL) : null);
+            File modelDir = getModelDirForUrl(url);
+            installModelFromUrlAsync(modelDir, url, true, !isCapturing, true);
             // モデルインストールリクエスト時は音声認識はここで開始しない
         } else if (ACTION_SELECT_MODEL.equals(action)) {
-            EngineType requestedEngineType = EngineType.fromPreference(intent != null ? intent.getStringExtra(EXTRA_ENGINE_TYPE) : null);
-            if (requestedEngineType == EngineType.WHISPER) {
-                String modelName = WhisperModelManager.normalizeModelName(intent != null ? intent.getStringExtra(EXTRA_MODEL_NAME) : null);
-                if (modelName == null && intent != null) {
-                    String modelUrl = intent.getStringExtra(EXTRA_MODEL_URL);
-                    if (modelUrl != null && !modelUrl.trim().isEmpty()) {
-                        try {
-                            modelName = WhisperModelManager.deriveModelNameFromUrl(modelUrl);
-                        } catch (IllegalArgumentException ignored) {
-                        }
-                    }
+            String modelName = normalizeModelName(intent != null ? intent.getStringExtra(EXTRA_MODEL_NAME) : null);
+            if (modelName == null && intent != null) {
+                String legacyUrl = intent.getStringExtra(EXTRA_MODEL_URL);
+                if (legacyUrl != null && !legacyUrl.trim().isEmpty()) {
+                    modelName = getModelNameFromUrl(legacyUrl);
                 }
-                boolean switched = switchToWhisperModelName(modelName, true);
-                if (logManager != null) {
-                    logManager.writeLog(switched ? ("Whisperモデル切替完了: " + modelName) : ("Whisperモデル切替失敗（未ダウンロード）: " + modelName), false);
-                }
-            } else {
-                String modelName = normalizeModelName(intent != null ? intent.getStringExtra(EXTRA_MODEL_NAME) : null);
-                if (modelName == null && intent != null) {
-                    String legacyUrl = intent.getStringExtra(EXTRA_MODEL_URL);
-                    if (legacyUrl != null && !legacyUrl.trim().isEmpty()) {
-                        modelName = getModelNameFromUrl(legacyUrl);
-                    }
-                }
-                boolean switched = switchToModelName(modelName, true);
-                if (logManager != null) {
-                    logManager.writeLog(switched ? ("モデル切替完了: " + modelName) : ("モデル切替失敗（未ダウンロード）: " + modelName), false);
-                }
+            }
+            boolean switched = switchToModelName(modelName, true);
+            if (logManager != null) {
+                logManager.writeLog(switched ? ("モデル切替完了: " + modelName) : ("モデル切替失敗（未ダウンロード）: " + modelName), false);
             }
             if (!isCapturing) {
                 stopSelf();
             }
         } else if (ACTION_DELETE_MODEL.equals(action)) {
-            EngineType requestedEngineType = EngineType.fromPreference(intent != null ? intent.getStringExtra(EXTRA_ENGINE_TYPE) : null);
-            if (requestedEngineType == EngineType.WHISPER) {
-                String modelName = WhisperModelManager.normalizeModelName(intent != null ? intent.getStringExtra(EXTRA_MODEL_NAME) : null);
-                if (modelName == null && intent != null) {
-                    String modelUrl = intent.getStringExtra(EXTRA_MODEL_URL);
-                    if (modelUrl != null && !modelUrl.trim().isEmpty()) {
-                        try {
-                            modelName = WhisperModelManager.deriveModelNameFromUrl(modelUrl);
-                        } catch (IllegalArgumentException ignored) {
-                        }
-                    }
+            String modelName = normalizeModelName(intent != null ? intent.getStringExtra(EXTRA_MODEL_NAME) : null);
+            if (modelName == null && intent != null) {
+                String legacyUrl = intent.getStringExtra(EXTRA_MODEL_URL);
+                if (legacyUrl != null && !legacyUrl.trim().isEmpty()) {
+                    modelName = getModelNameFromUrl(legacyUrl);
                 }
-                boolean deleted = deleteWhisperModelByName(modelName);
-                if (logManager != null) {
-                    logManager.writeLog(deleted ? ("Whisperモデル削除完了: " + modelName) : ("Whisperモデル削除対象なし: " + modelName), false);
-                }
-            } else {
-                String modelName = normalizeModelName(intent != null ? intent.getStringExtra(EXTRA_MODEL_NAME) : null);
-                if (modelName == null && intent != null) {
-                    String legacyUrl = intent.getStringExtra(EXTRA_MODEL_URL);
-                    if (legacyUrl != null && !legacyUrl.trim().isEmpty()) {
-                        modelName = getModelNameFromUrl(legacyUrl);
-                    }
-                }
-                boolean deleted = deleteModelByName(modelName);
-                if (logManager != null) {
-                    logManager.writeLog(deleted ? ("モデル削除完了: " + modelName) : ("モデル削除対象なし: " + modelName), false);
-                }
+            }
+            boolean deleted = deleteModelByName(modelName);
+            if (logManager != null) {
+                logManager.writeLog(deleted ? ("モデル削除完了: " + modelName) : ("モデル削除対象なし: " + modelName), false);
             }
             if (!isCapturing) {
                 stopSelf();
@@ -253,13 +197,15 @@ public class VoiceListenerService extends Service {
             initializeAsrEngine();
             if (logManager != null) {
                 try {
-                    logManager.writeLog("認識エンジン再読込: " + SpeechRecognitionPreferences.getActiveEngine(this).getDisplayName(), false);
+                    logManager.writeLog("認識エンジン再読込: " + EngineType.VOSK.getDisplayName(), false);
                 } catch (Exception ignored) {
                 }
             }
             if (!isCapturing) {
                 stopSelf();
             }
+        } else if (ACTION_REFRESH_SUMMARY.equals(action)) {
+            requestSummaryRefresh(!isCapturing);
         } else if (ACTION_STOP_MONITORING.equals(action)) {
             // UIの停止要求: 録音は停止し、既にキューに入っている処理を完了したらサービスを終了する
             try { if (logManager != null) logManager.writeLog("監視停止要求を受信: 録音を停止し、保留処理完了後に終了します", false); } catch (Exception ignored) {}
@@ -281,7 +227,11 @@ public class VoiceListenerService extends Service {
                         }
                         cancelPendingSummaryTask();
                         shutdownSummaryExecutor(true);
-                        refreshLiveSummary(true);
+                        if (LiveSummaryStore.getSummaryUpdateMode(this) == SummaryUpdateMode.AUTO) {
+                            refreshLiveSummary(true);
+                        } else {
+                            markSummaryWaitingForManualRefresh();
+                        }
                     } catch (InterruptedException e) {
                         Thread.currentThread().interrupt();
                         try { if (logManager != null) logManager.writeLog("監視停止待機中に割込: " + e.getMessage(), false); } catch (Exception ignored) {}
@@ -303,7 +253,11 @@ public class VoiceListenerService extends Service {
                     }
                     cancelPendingSummaryTask();
                     shutdownSummaryExecutor(true);
-                    refreshLiveSummary(true);
+                    if (LiveSummaryStore.getSummaryUpdateMode(this) == SummaryUpdateMode.AUTO) {
+                        refreshLiveSummary(true);
+                    } else {
+                        markSummaryWaitingForManualRefresh();
+                    }
                     try { if (logManager != null) logManager.writeLog("保留処理なし、サービスを停止します", false); } catch (Exception ignored) {}
                     try { if (sharedPrefs != null) sharedPrefs.edit().putString(PREF_MON_STATE, MON_STATE_STOPPED).apply(); } catch (Exception ignored) {}
                     stopSelf();
@@ -329,7 +283,6 @@ public class VoiceListenerService extends Service {
             transcriptionExecutor.shutdownNow();
             transcriptionExecutor = null;
         }
-        whisperWorkQueue.reset();
 
         if (speechRecognizerFacade != null) {
             speechRecognizerFacade.release();
@@ -450,12 +403,9 @@ public class VoiceListenerService extends Service {
     }
 
     private void initializeAsrEngine() {
-        whisperWorkQueue.reset();
-        EngineType activeEngineType = SpeechRecognitionPreferences.getActiveEngine(this);
-        rebuildVoiceActivityDetector(activeEngineType);
-        boolean initialized = activeEngineType == EngineType.WHISPER
-            ? initializeWhisperEngine()
-            : initializeVoskEngineWithModel(resolvePreferredModelDir());
+        SpeechRecognitionPreferences.setActiveEngine(this, EngineType.VOSK);
+        rebuildVoiceActivityDetector();
+        boolean initialized = initializeVoskEngineWithModel(resolvePreferredModelDir());
         if (initialized) {
             return;
         }
@@ -463,28 +413,10 @@ public class VoiceListenerService extends Service {
         if (speechRecognizerFacade != null) {
             speechRecognizerFacade.setFallbackToNoOp();
         }
-        Log.w(TAG, "ASR engine fallback: NoOp (" + activeEngineType.getDisplayName() + ")");
+        Log.w(TAG, "ASR engine fallback: NoOp (" + EngineType.VOSK.getDisplayName() + ")");
     }
 
-    private VoiceActivityDetector createVoiceActivityDetector(EngineType engineType, double rmsThreshold) {
-        if (engineType == EngineType.WHISPER) {
-            logWhisperTrace(
-                RecognitionTraceContext.NO_TRACE_ID,
-                "vad.config",
-                "engine=WHISPER frameSamples=" + FRAME_SAMPLES
-                    + " frameMs=" + samplesToMillis(FRAME_SAMPLES)
-                    + " rmsThreshold=" + String.format(Locale.US, "%.1f", rmsThreshold)
-                    + " minSpeechFrames=" + WHISPER_MIN_SPEECH_FRAMES
-                    + " maxSilenceFrames=" + WHISPER_MAX_SILENCE_FRAMES
-                    + " maxContinuousSpeechFrames=" + WHISPER_MAX_CONTINUOUS_SPEECH_FRAMES
-            );
-            return new VoiceActivityDetector(
-                rmsThreshold,
-                WHISPER_MAX_SILENCE_FRAMES,
-                WHISPER_MIN_SPEECH_FRAMES,
-                WHISPER_MAX_CONTINUOUS_SPEECH_FRAMES
-            );
-        }
+    private VoiceActivityDetector createVoiceActivityDetector(double rmsThreshold) {
         return new VoiceActivityDetector(
             rmsThreshold,
             VOSK_MAX_SILENCE_FRAMES,
@@ -493,11 +425,11 @@ public class VoiceListenerService extends Service {
         );
     }
 
-    private void rebuildVoiceActivityDetector(EngineType engineType) {
+    private void rebuildVoiceActivityDetector() {
         double rmsThreshold = sharedPrefs == null
             ? RMS_THRESHOLD
             : sharedPrefs.getFloat(PREF_RMS_THRESHOLD, (float) RMS_THRESHOLD);
-        vad = createVoiceActivityDetector(engineType, rmsThreshold);
+        vad = createVoiceActivityDetector(rmsThreshold);
     }
 
     private void installModelIfMissingAsync(File modelDir) {
@@ -522,125 +454,15 @@ public class VoiceListenerService extends Service {
         return true;
     }
 
-    private boolean initializeWhisperEngine() {
-        long resolveStartedNs = System.nanoTime();
-        try {
-            File modelFile = WhisperModelManager.resolvePreferredDownloadedModelFile(this);
-            boolean usedBundledModel = false;
-            if (modelFile == null || !WhisperModelManager.hasModelContent(modelFile)) {
-                modelFile = WhisperModelAssetInstaller.ensureBundledModelCopied(this);
-                usedBundledModel = true;
-            }
-            long resolveMs = nanosToMillis(System.nanoTime() - resolveStartedNs);
-            if (modelFile == null || !modelFile.exists()) {
-                logWhisperTrace(
-                    RecognitionTraceContext.NO_TRACE_ID,
-                    "model.resolve.miss",
-                    "resolveMs=" + resolveMs
-                        + " source=" + (usedBundledModel ? "bundled" : "downloaded")
-                        + " expectedModel=" + WhisperModelManager.DEFAULT_MODEL_NAME
-                );
-                try { if (logManager != null) logManager.writeLog("Whisperモデルが見つかりません: ダウンロード済みモデルまたは assets/models/*.gguf を確認してください", false); } catch (Exception ignored) {}
-                return false;
-            }
-            logWhisperTrace(
-                RecognitionTraceContext.NO_TRACE_ID,
-                "model.resolve",
-                "resolveMs=" + resolveMs
-                    + " source=" + (usedBundledModel ? "bundled" : "downloaded")
-                    + " path=" + modelFile.getAbsolutePath()
-                    + " sizeBytes=" + modelFile.length()
-                    + " quantization=" + WhisperModelManager.describeQuantization(modelFile.getName())
-            );
-            return initializeWhisperEngineWithModel(modelFile);
-        } catch (Exception e) {
-            long resolveMs = nanosToMillis(System.nanoTime() - resolveStartedNs);
-            Log.e(TAG, "Failed to prepare Whisper model", e);
-            logWhisperTrace(
-                RecognitionTraceContext.NO_TRACE_ID,
-                "model.resolve.error",
-                "resolveMs=" + resolveMs
-                    + " error=" + e.getClass().getSimpleName() + ":" + String.valueOf(e.getMessage())
-            );
-            try { if (logManager != null) logManager.writeLog("Whisperモデル準備失敗: " + e.getMessage(), false); } catch (Exception ignored) {}
-            return false;
-        }
-    }
-
-    private boolean initializeWhisperEngineWithModel(File modelFile) {
-        if (!WhisperModelManager.hasModelContent(modelFile)) {
-            logWhisperTrace(
-                RecognitionTraceContext.NO_TRACE_ID,
-                "model.validate.miss",
-                "path=" + (modelFile == null ? "<null>" : modelFile.getAbsolutePath())
-            );
-            return false;
-        }
-        SpeechRecognizerConfig config = new SpeechRecognizerConfig(
-            EngineType.WHISPER,
-            modelFile.getAbsolutePath(),
-            SAMPLE_RATE_HZ,
-            SpeechRecognizerConfig.defaultWhisperLanguage(),
-            SpeechRecognizerConfig.defaultThreadCount()
-        );
-        logWhisperTrace(
-            RecognitionTraceContext.NO_TRACE_ID,
-            "engine.configure.begin",
-                "modelPath=" + modelFile.getAbsolutePath()
-                    + " modelName=" + modelFile.getName()
-                    + " sizeBytes=" + modelFile.length()
-                    + " quantization=" + WhisperModelManager.describeQuantization(modelFile.getName())
-                    + " sampleRateHz=" + config.getSampleRateHz()
-                    + " language=" + config.getLanguage()
-                    + " threadCount=" + config.getThreadCount()
-                + " availableProcessors=" + Runtime.getRuntime().availableProcessors()
-        );
-        long configureStartedNs = System.nanoTime();
-        if (!configureSpeechRecognizer(config)) {
-            logWhisperTrace(
-                RecognitionTraceContext.NO_TRACE_ID,
-                "engine.configure.failed",
-                "elapsedMs=" + nanosToMillis(System.nanoTime() - configureStartedNs)
-                    + " modelPath=" + modelFile.getAbsolutePath()
-            );
-            return false;
-        }
-        logWhisperTrace(
-            RecognitionTraceContext.NO_TRACE_ID,
-            "engine.configure.done",
-            "elapsedMs=" + nanosToMillis(System.nanoTime() - configureStartedNs)
-                + " modelPath=" + modelFile.getAbsolutePath()
-        );
-        Log.i(TAG, "ASR engine: " + config.getEngineType().getDisplayName() + " @ " + modelFile.getAbsolutePath());
-        return true;
-    }
-
     private boolean configureSpeechRecognizer(SpeechRecognizerConfig config) {
         if (speechRecognizerFacade == null) {
             speechRecognizerFacade = SpeechRecognizerFacade.createDefault();
         }
-        long selectStartedNs = System.nanoTime();
         try {
             speechRecognizerFacade.selectEngine(config);
-            if (config.getEngineType() == EngineType.WHISPER) {
-                logWhisperTrace(
-                    RecognitionTraceContext.NO_TRACE_ID,
-                    "facade.selectEngine",
-                    "elapsedMs=" + nanosToMillis(System.nanoTime() - selectStartedNs)
-                        + " engineType=" + config.getEngineType()
-                );
-            }
             return true;
         } catch (Exception e) {
             Log.e(TAG, "Speech recognizer configuration failed: " + config.getEngineType().getDisplayName(), e);
-            if (config.getEngineType() == EngineType.WHISPER) {
-                logWhisperTrace(
-                    RecognitionTraceContext.NO_TRACE_ID,
-                    "facade.selectEngine.error",
-                    "elapsedMs=" + nanosToMillis(System.nanoTime() - selectStartedNs)
-                        + " error=" + e.getClass().getSimpleName() + ":" + String.valueOf(e.getMessage())
-                );
-            }
             try {
                 if (logManager != null) {
                     logManager.writeLog("認識エンジン初期化失敗 (" + config.getEngineType().getDisplayName() + "): " + e.getMessage(), false);
@@ -749,120 +571,6 @@ public class VoiceListenerService extends Service {
                 Log.e(TAG, "モデル取得例外", e);
             } finally {
                 try { updateDownloadProgress(false, finalProgress, modelName); } catch (Exception ignored) {}
-                if (stopServiceOnFinish) {
-                    try { stopSelf(); } catch (Exception ignored) {}
-                }
-            }
-        });
-    }
-
-    private void installWhisperModelFromUrlAsync(String url, boolean stopServiceOnFinish, boolean activateAfterInstall) {
-        final String normalizedUrl = WhisperModelManager.normalizeModelUrl(url);
-        final String modelName;
-        final File modelFile;
-        try {
-            modelName = WhisperModelManager.deriveModelNameFromUrl(normalizedUrl);
-            modelFile = WhisperModelManager.getModelFileForName(this, modelName);
-        } catch (IllegalArgumentException e) {
-            try { if (logManager != null) logManager.writeLog("WhisperモデルURLが不正です: " + e.getMessage(), false); } catch (Exception ignored) {}
-            if (stopServiceOnFinish) {
-                stopSelf();
-            }
-            return;
-        }
-        if (modelFile == null) {
-            try { if (logManager != null) logManager.writeLog("Whisperモデル保存先を解決できません", false); } catch (Exception ignored) {}
-            if (stopServiceOnFinish) {
-                stopSelf();
-            }
-            return;
-        }
-        if (modelInstallerExecutor == null) {
-            modelInstallerExecutor = Executors.newSingleThreadExecutor();
-        }
-        modelInstallerExecutor.execute(() -> {
-            int finalProgress = 0;
-            File temporaryFile = null;
-            try {
-                updateWhisperDownloadProgress(true, 0, modelName);
-                if (logManager != null) {
-                    logManager.writeLog("Whisperモデル取得開始: " + normalizedUrl);
-                }
-                File modelsRoot = WhisperModelManager.getModelsRootDir(this);
-                if (!modelsRoot.exists() && !modelsRoot.mkdirs()) {
-                    if (logManager != null) {
-                        logManager.writeLog("Whisperモデルフォルダ作成失敗: " + modelsRoot.getAbsolutePath());
-                    }
-                    return;
-                }
-
-                temporaryFile = new File(modelsRoot, modelName + ".download");
-                if (temporaryFile.exists()) {
-                    deleteRecursively(temporaryFile);
-                }
-
-                boolean downloadOk = downloadFile(
-                    normalizedUrl,
-                    temporaryFile,
-                    modelName,
-                    WhisperModelManager.PREF_MODEL_DOWNLOAD_ACTIVE,
-                    WhisperModelManager.PREF_MODEL_DOWNLOAD_PROGRESS,
-                    WhisperModelManager.PREF_MODEL_DOWNLOAD_NAME
-                );
-                if (!downloadOk || !WhisperModelManager.hasModelContent(temporaryFile)) {
-                    if (logManager != null) {
-                        logManager.writeLog("Whisperモデルダウンロード失敗");
-                    }
-                    return;
-                }
-
-                if (modelFile.exists()) {
-                    deleteRecursively(modelFile);
-                }
-
-                boolean moveOk = temporaryFile.renameTo(modelFile);
-                if (!moveOk && !copyDirectory(temporaryFile, modelFile)) {
-                    if (logManager != null) {
-                        logManager.writeLog("Whisperモデル保存失敗");
-                    }
-                    return;
-                }
-                if (!WhisperModelManager.hasModelContent(modelFile)) {
-                    if (logManager != null) {
-                        logManager.writeLog("Whisperモデル検証失敗");
-                    }
-                    return;
-                }
-
-                if (logManager != null) {
-                    logManager.writeLog("Whisperモデル取得完了: " + modelFile.getAbsolutePath());
-                }
-                finalProgress = 100;
-
-                if (activateAfterInstall) {
-                    WhisperModelManager.setSelectedModelName(this, modelName);
-                }
-
-                if (activateAfterInstall && SpeechRecognitionPreferences.getActiveEngine(this) == EngineType.WHISPER) {
-                    if (switchToWhisperModelName(modelName, false)) {
-                        if (logManager != null) {
-                            logManager.writeLog("Whisper ASRエンジン初期化成功");
-                        }
-                    } else if (logManager != null) {
-                        logManager.writeLog("Whisper ASRエンジン初期化失敗");
-                    }
-                }
-            } catch (Exception e) {
-                try { if (logManager != null) logManager.writeLog("Whisperモデル取得中に例外発生: " + e.getMessage()); } catch (Exception ignored) {}
-                Log.e(TAG, "Whisperモデル取得例外", e);
-            } finally {
-                try {
-                    if (temporaryFile != null && temporaryFile.exists()) {
-                        deleteRecursively(temporaryFile);
-                    }
-                } catch (Exception ignored) {
-                }
-                try { updateWhisperDownloadProgress(false, finalProgress, modelName); } catch (Exception ignored) {}
                 if (stopServiceOnFinish) {
                     try { stopSelf(); } catch (Exception ignored) {}
                 }
@@ -995,25 +703,7 @@ public class VoiceListenerService extends Service {
                 .remove(PREF_ACTIVE_MODEL_URL)
                 .apply();
         }
-        if (SpeechRecognitionPreferences.getActiveEngine(this) != EngineType.VOSK) {
-            return true;
-        }
         return initializeVoskEngineWithModel(modelDir);
-    }
-
-    private boolean switchToWhisperModelName(String modelName, boolean persistSelection) {
-        String normalizedModelName = WhisperModelManager.normalizeModelName(modelName);
-        File modelFile = WhisperModelManager.getModelFileForName(this, normalizedModelName);
-        if (!WhisperModelManager.hasModelContent(modelFile)) {
-            return false;
-        }
-        if (persistSelection) {
-            WhisperModelManager.setSelectedModelName(this, normalizedModelName);
-        }
-        if (SpeechRecognitionPreferences.getActiveEngine(this) != EngineType.WHISPER) {
-            return true;
-        }
-        return initializeWhisperEngineWithModel(modelFile);
     }
 
     private boolean deleteModelByName(String modelName) {
@@ -1035,27 +725,6 @@ public class VoiceListenerService extends Service {
                 if (SpeechRecognitionPreferences.getActiveEngine(this) == EngineType.VOSK) {
                     initializeAsrEngine();
                 }
-            }
-        }
-        return deleted;
-    }
-
-    private boolean deleteWhisperModelByName(String modelName) {
-        String normalizedModelName = WhisperModelManager.normalizeModelName(modelName);
-        File modelFile = WhisperModelManager.getModelFileForName(this, normalizedModelName);
-        if (modelFile == null || !modelFile.exists()) {
-            return false;
-        }
-
-        deleteRecursively(modelFile);
-        boolean deleted = !modelFile.exists();
-        if (deleted) {
-            String activeModelName = WhisperModelManager.getSelectedModelName(this);
-            if (normalizedModelName != null && normalizedModelName.equals(activeModelName)) {
-                WhisperModelManager.setSelectedModelName(this, null);
-            }
-            if (SpeechRecognitionPreferences.getActiveEngine(this) == EngineType.WHISPER) {
-                initializeAsrEngine();
             }
         }
         return deleted;
@@ -1100,6 +769,10 @@ public class VoiceListenerService extends Service {
     }
 
     private void scheduleSummaryRefresh(long delayMs) {
+        if (LiveSummaryStore.getSummaryUpdateMode(this) != SummaryUpdateMode.AUTO) {
+            markSummaryWaitingForManualRefresh();
+            return;
+        }
         ensureSummaryExecutor();
         cancelPendingSummaryTask();
         pendingSummaryFuture = summaryExecutor.schedule(() -> {
@@ -1137,7 +810,46 @@ public class VoiceListenerService extends Service {
         }
     }
 
-    private void refreshLiveSummary(boolean force) {
+    private void requestSummaryRefresh(boolean stopSelfWhenFinished) {
+        ensureSummaryExecutor();
+        cancelPendingSummaryTask();
+        saveSummaryStateWithStatus(LiveSummaryStore.loadSummaryState(this), "手動要約中");
+        summaryExecutor.execute(() -> {
+            try {
+                refreshLiveSummary(true);
+            } finally {
+                if (stopSelfWhenFinished && !isCapturing) {
+                    stopSelf();
+                }
+            }
+        });
+    }
+
+    private void markSummaryWaitingForManualRefresh() {
+        LiveSummaryState previousState = LiveSummaryStore.loadSummaryState(this);
+        int pendingChars = LiveSummaryStore.getPendingSummaryLogCharCount(this);
+        saveSummaryStateWithStatus(
+            previousState,
+            pendingChars > 0 ? "手動更新待ち" : "要約待機中"
+        );
+    }
+
+    private void saveSummaryStateWithStatus(LiveSummaryState baseState, String status) {
+        LiveSummaryState safeState = baseState == null ? LiveSummaryState.empty() : baseState;
+        LiveSummaryStore.saveSummaryState(this, new LiveSummaryState(
+            safeState.getSummary(),
+            safeState.getDecisions(),
+            safeState.getTodos(),
+            status,
+            safeState.getUpdatedAtMillis()
+        ));
+    }
+
+    private void refreshLiveSummary(boolean manualRequest) {
+        if (!manualRequest && LiveSummaryStore.getSummaryUpdateMode(this) != SummaryUpdateMode.AUTO) {
+            markSummaryWaitingForManualRefresh();
+            return;
+        }
         long summaryRevision = LiveSummaryStore.getSummaryRevision(this);
         LiveSummaryState previousState = LiveSummaryStore.loadSummaryState(this);
         String pendingLogs = LiveSummaryStore.getPendingSummaryLogs(this);
@@ -1145,17 +857,14 @@ public class VoiceListenerService extends Service {
             return;
         }
         if (pendingLogs.isEmpty()) {
-            if (force) {
+            if (manualRequest) {
                 if (LiveSummaryStore.getSummaryRevision(this) != summaryRevision) {
                     return;
                 }
-                LiveSummaryStore.saveSummaryState(this, new LiveSummaryState(
-                    previousState.getSummary(),
-                    previousState.getDecisions(),
-                    previousState.getTodos(),
-                    "要約待機中",
-                    previousState.getUpdatedAtMillis()
-                ));
+                saveSummaryStateWithStatus(
+                    previousState,
+                    LiveSummaryStore.getSummaryUpdateMode(this) == SummaryUpdateMode.MANUAL ? "未要約ログなし" : "要約待機中"
+                );
             }
             return;
         }
@@ -1207,7 +916,7 @@ public class VoiceListenerService extends Service {
                 result.getState().getSummary(),
                 result.getState().getDecisions(),
                 result.getState().getTodos(),
-                "要約更新済み",
+                manualRequest ? "手動要約更新済み" : "要約更新済み",
                 updatedAt
             ));
         } catch (OllamaClient.SummaryGenerationException e) {
@@ -1348,17 +1057,6 @@ public class VoiceListenerService extends Service {
         );
     }
 
-    private void updateWhisperDownloadProgress(boolean active, int progress, String modelName) {
-        updateDownloadProgress(
-            active,
-            progress,
-            modelName,
-            WhisperModelManager.PREF_MODEL_DOWNLOAD_ACTIVE,
-            WhisperModelManager.PREF_MODEL_DOWNLOAD_PROGRESS,
-            WhisperModelManager.PREF_MODEL_DOWNLOAD_NAME
-        );
-    }
-
     private void updateDownloadProgress(boolean active, int progress, String modelName, String activeKey, String progressKey, String nameKey) {
         if (sharedPrefs == null) return;
         sharedPrefs.edit()
@@ -1445,7 +1143,6 @@ public class VoiceListenerService extends Service {
         }
         ensureTranscriptionExecutor();
         ensureSummaryExecutor();
-        whisperWorkQueue.reset();
         if (speechRecognizerFacade == null || !speechRecognizerFacade.hasActiveEngine()) {
             initializeAsrEngine();
         }
@@ -1529,18 +1226,6 @@ public class VoiceListenerService extends Service {
         captureThread = new Thread(this::captureLoop, "AudioCaptureThread");
         captureThread.start();
         Log.i(TAG, "AudioRecord capture started: " + audioSourceLabel(activeAudioSource));
-        if (isWhisperActiveEngine()) {
-            logWhisperTrace(
-                RecognitionTraceContext.NO_TRACE_ID,
-                "capture.start",
-                "audioSource=" + audioSourceLabel(activeAudioSource)
-                    + " frameSamples=" + FRAME_SAMPLES
-                    + " frameMs=" + samplesToMillis(FRAME_SAMPLES)
-                    + " minBufferBytes=" + minBufferBytes
-                    + " recordBufferBytes=" + recordBufferBytes
-                    + " " + describeExecutorState(transcriptionExecutor)
-            );
-        }
         try { if (sharedPrefs != null) sharedPrefs.edit().putString(PREF_MON_STATE, MON_STATE_RUNNING).apply(); } catch (Exception ignored) {}
         try { if (logManager != null) logManager.writeLog("録音開始 (" + audioSourceLabel(activeAudioSource) + ")"); } catch (Exception ignored) {}
     }
@@ -1561,22 +1246,7 @@ public class VoiceListenerService extends Service {
             short[] frame = Arrays.copyOf(readBuffer, readSamples);
             publishCurrentRms(frame);
             short[] segment = vad.processFrame(frame);
-            if (isWhisperActiveEngine()) {
-                submitWhisperWork(frame, false, "stream.frame", 0);
-            }
             if (segment != null && segment.length > 0) {
-                if (isWhisperActiveEngine()) {
-                    logWhisperTrace(
-                        RecognitionTraceContext.NO_TRACE_ID,
-                        "segment.ready",
-                        "samples=" + segment.length
-                            + " segmentMs=" + samplesToMillis(segment.length)
-                            + " flushReason=vad.segment"
-                            + " " + describeExecutorState(transcriptionExecutor)
-                    );
-                    submitWhisperWork(null, true, "vad.segment", segment.length);
-                    continue;
-                }
                 submitForTranscription(segment);
             }
         }
@@ -1613,7 +1283,9 @@ public class VoiceListenerService extends Service {
             return;
         }
         LiveSummaryStore.appendPendingSummaryLog(this, summaryInputText);
-        if (LiveSummaryStore.getPendingSummaryLogCharCount(this) >= LiveSummaryStore.getSummaryForceCharThreshold(this)) {
+        if (LiveSummaryStore.getSummaryUpdateMode(this) != SummaryUpdateMode.AUTO) {
+            markSummaryWaitingForManualRefresh();
+        } else if (LiveSummaryStore.getPendingSummaryLogCharCount(this) >= LiveSummaryStore.getSummaryForceCharThreshold(this)) {
             triggerImmediateSummaryRefresh();
         } else {
             scheduleSummaryRefresh();
@@ -1621,288 +1293,29 @@ public class VoiceListenerService extends Service {
     }
 
     private void submitForTranscription(short[] segment) {
-        submitForTranscription(segment, false, "segment", 0);
-    }
-
-    private void submitWhisperWork(short[] audioBuffer, boolean flushAfter, String triggerReason, int relatedSamples) {
         ensureTranscriptionExecutor();
-        if (transcriptionExecutor == null) {
+        if (transcriptionExecutor == null || segment == null || segment.length == 0) {
             return;
         }
-        boolean shouldScheduleWorker = whisperWorkQueue.offer(audioBuffer, flushAfter, triggerReason, relatedSamples);
-        if (!shouldScheduleWorker) {
-            return;
-        }
-        executeTranscriptionTask(
-            this::runWhisperWorkLoop,
-            RecognitionTraceContext.NO_TRACE_ID,
-            true,
-            whisperWorkQueue::cancelWorker
-        );
-    }
-
-    private void runWhisperWorkLoop() {
-        WhisperWorkQueue.WorkItem workItem;
-        while ((workItem = whisperWorkQueue.pollNextWork()) != null) {
-            processWhisperWorkItem(workItem);
-        }
-    }
-
-    private void processWhisperWorkItem(WhisperWorkQueue.WorkItem workItem) {
-        long traceId = whisperTraceCounter.incrementAndGet();
-        long taskStartedNs = System.nanoTime();
-        RecognitionTraceContext.set(traceId);
         try {
-            SpeechRecognizerFacade facade = speechRecognizerFacade;
-            if (facade == null) {
-                logWhisperTrace(traceId, "queue.skip", "reason=no-facade");
-                return;
-            }
-            EngineType engineType = facade.currentEngineType();
-            if (engineType != EngineType.WHISPER) {
-                logWhisperTrace(
-                    traceId,
-                    "queue.skip",
-                    "reason=engine-switched engineType=" + engineType
-                );
-                return;
-            }
-
-            short[] audioBuffer = workItem.getAudioBuffer();
-            String triggerReason = workItem.getTriggerReason();
-            int relatedSamples = workItem.getRelatedSamples();
-            boolean flushAfter = workItem.shouldFlushAfter();
-            int inputSamples = audioBuffer.length;
-            int droppedSamples = workItem.getDroppedSampleCount();
-
-            if (droppedSamples > 0) {
-                logWhisperTrace(
-                    traceId,
-                    "queue.drop",
-                    "droppedSamples=" + droppedSamples
-                        + " droppedMs=" + samplesToMillis(droppedSamples)
-                        + " pendingAfterDrain=" + workItem.getPendingSampleCountAfterDrain()
-                );
-            }
-
-            logWhisperTrace(
-                traceId,
-                "queue.start",
-                "inputSamples=" + inputSamples
-                    + " inputMs=" + samplesToMillis(inputSamples)
-                    + " trigger=" + triggerReason
-                    + " relatedSamples=" + relatedSamples
-                    + " relatedMs=" + samplesToMillis(relatedSamples)
-                    + " flushAfter=" + flushAfter
-                    + " pendingAfterDrain=" + workItem.getPendingSampleCountAfterDrain()
-                    + " " + describeExecutorState(transcriptionExecutor)
-            );
-
-            StringBuilder recognizedBuilder = new StringBuilder();
-            if (inputSamples > 0) {
-                long transcribeStartedNs = System.nanoTime();
-                String transcribed = normalizeRecognizedText(facade.transcribe(audioBuffer));
-                long transcribeMs = nanosToMillis(System.nanoTime() - transcribeStartedNs);
-                appendRecognizedText(recognizedBuilder, transcribed);
-                logWhisperTrace(
-                    traceId,
-                    "queue.result",
-                    "inputSamples=" + inputSamples
-                        + " inputMs=" + samplesToMillis(inputSamples)
-                        + " trigger=" + triggerReason
-                        + " relatedSamples=" + relatedSamples
-                        + " relatedMs=" + samplesToMillis(relatedSamples)
-                        + " recognizedChars=" + transcribed.length()
-                        + " empty=" + transcribed.isEmpty()
-                        + " transcribeMs=" + transcribeMs
-                );
-            }
-
-            if (flushAfter) {
-                long flushStartedNs = System.nanoTime();
-                String flushed = normalizeRecognizedText(facade.flush());
-                long flushMs = nanosToMillis(System.nanoTime() - flushStartedNs);
-                appendRecognizedText(recognizedBuilder, flushed);
-                logWhisperTrace(
-                    traceId,
-                    "queue.flush.result",
-                    "trigger=" + triggerReason
-                        + " relatedSamples=" + relatedSamples
-                        + " relatedMs=" + samplesToMillis(relatedSamples)
-                        + " recognizedChars=" + flushed.length()
-                        + " empty=" + flushed.isEmpty()
-                        + " flushMs=" + flushMs
-                );
-            }
-
-            String normalizedText = normalizeRecognizedText(recognizedBuilder.toString());
-            logWhisperTrace(
-                traceId,
-                "queue.complete",
-                "recognizedChars=" + normalizedText.length()
-                    + " trigger=" + triggerReason
-                    + " flushAfter=" + flushAfter
-                    + " totalTaskMs=" + nanosToMillis(System.nanoTime() - taskStartedNs)
-            );
-            if (normalizedText.isEmpty()) {
-                return;
-            }
-            handleRecognizedText(normalizedText);
-        } catch (Exception e) {
-            logWhisperTrace(
-                traceId,
-                "queue.error",
-                "error=" + e.getClass().getSimpleName() + ":" + String.valueOf(e.getMessage())
-                    + " totalTaskMs=" + nanosToMillis(System.nanoTime() - taskStartedNs)
-            );
-            Log.e(TAG, "Whisper transcription task failed", e);
-            try { if (logManager != null) logManager.writeLog("Whisper例外: " + e.getMessage()); } catch (Exception ignored) {}
-        } finally {
-            RecognitionTraceContext.clear();
-        }
-    }
-
-    private void submitForTranscription(short[] segment, boolean flushOnly, String triggerReason, int relatedSamples) {
-        ensureTranscriptionExecutor();
-        if (transcriptionExecutor == null) return;
-
-        SpeechRecognizerFacade currentFacade = speechRecognizerFacade;
-        EngineType initialEngineType = currentFacade == null ? null : currentFacade.currentEngineType();
-        final long traceId = initialEngineType == EngineType.WHISPER
-            ? whisperTraceCounter.incrementAndGet()
-            : RecognitionTraceContext.NO_TRACE_ID;
-        final int rawSamples = segment == null ? 0 : segment.length;
-        final long queuedAtNs = System.nanoTime();
-
-        if (traceId != RecognitionTraceContext.NO_TRACE_ID) {
-            logWhisperTrace(
-                traceId,
-                flushOnly ? "queue.flush.submit" : "queue.submit",
-                "rawSamples=" + rawSamples
-                    + " rawMs=" + samplesToMillis(rawSamples)
-                    + " trigger=" + triggerReason
-                    + " relatedSamples=" + relatedSamples
-                    + " relatedMs=" + samplesToMillis(relatedSamples)
-                    + " " + describeExecutorState(transcriptionExecutor)
-            );
-        }
-
-        Runnable task = () -> {
-            long taskStartedNs = System.nanoTime();
-            RecognitionTraceContext.set(traceId);
-            try {
-                SpeechRecognizerFacade facade = speechRecognizerFacade; // snapshot to avoid race with release
-                long queueWaitMs = nanosToMillis(taskStartedNs - queuedAtNs);
-                if (facade == null) {
-                    if (traceId != RecognitionTraceContext.NO_TRACE_ID) {
-                        logWhisperTrace(traceId, "queue.skip", "reason=no-facade queueWaitMs=" + queueWaitMs);
+            transcriptionExecutor.execute(() -> {
+                try {
+                    SpeechRecognizerFacade facade = speechRecognizerFacade;
+                    if (facade == null) {
+                        return;
                     }
-                    return;
+                    String normalizedText = normalizeRecognizedText(facade.transcribe(segment));
+                    if (!normalizedText.isEmpty()) {
+                        handleRecognizedText(normalizedText);
+                    }
+                } catch (Exception e) {
+                    Log.e(TAG, "Transcription task failed", e);
+                    try { if (logManager != null) logManager.writeLog("Transcription例外: " + e.getMessage()); } catch (Exception ignored) {}
                 }
-                EngineType engineType = facade.currentEngineType();
-                boolean whisperRequest = engineType == EngineType.WHISPER;
-                if (traceId != RecognitionTraceContext.NO_TRACE_ID) {
-                    logWhisperTrace(
-                        traceId,
-                        flushOnly ? "queue.flush.start" : "queue.start",
-                        "queueWaitMs=" + queueWaitMs
-                            + " engineType=" + engineType
-                            + " rawSamples=" + rawSamples
-                            + " rawMs=" + samplesToMillis(rawSamples)
-                            + " trigger=" + triggerReason
-                            + " relatedSamples=" + relatedSamples
-                            + " relatedMs=" + samplesToMillis(relatedSamples)
-                            + " " + describeExecutorState(transcriptionExecutor)
-                    );
-                }
-                long transcribeStartedNs = System.nanoTime();
-                String recognizedText = flushOnly
-                    ? facade.flush()
-                    : facade.transcribe(segment == null ? new short[0] : segment);
-                long transcribeMs = nanosToMillis(System.nanoTime() - transcribeStartedNs);
-                String normalizedText = normalizeRecognizedText(recognizedText);
-                if (whisperRequest) {
-                    logWhisperTrace(
-                        traceId,
-                        flushOnly ? "queue.flush.result" : "queue.result",
-                        "inputSamples=" + rawSamples
-                            + " inputMs=" + samplesToMillis(rawSamples)
-                            + " trigger=" + triggerReason
-                            + " relatedSamples=" + relatedSamples
-                            + " relatedMs=" + samplesToMillis(relatedSamples)
-                            + " recognizedChars=" + normalizedText.length()
-                            + " empty=" + normalizedText.isEmpty()
-                            + " transcribeMs=" + transcribeMs
-                    );
-                }
-                if (normalizedText.isEmpty()) {
-                    return;
-                }
-                handleRecognizedText(normalizedText);
-                if (whisperRequest) {
-                    logWhisperTrace(
-                        traceId,
-                        flushOnly ? "queue.flush.complete" : "queue.complete",
-                        "recognizedChars=" + normalizedText.length()
-                            + " trigger=" + triggerReason
-                            + " totalTaskMs=" + nanosToMillis(System.nanoTime() - taskStartedNs)
-                    );
-                }
-            } catch (Exception e) {
-                if (traceId != RecognitionTraceContext.NO_TRACE_ID) {
-                    logWhisperTrace(
-                        traceId,
-                        "queue.error",
-                        "error=" + e.getClass().getSimpleName() + ":" + String.valueOf(e.getMessage())
-                            + " totalTaskMs=" + nanosToMillis(System.nanoTime() - taskStartedNs)
-                    );
-                }
-                Log.e(TAG, "Transcription task failed", e);
-                try { if (logManager != null) logManager.writeLog("Transcription例外: " + e.getMessage()); } catch (Exception ignored) {}
-            } finally {
-                RecognitionTraceContext.clear();
-            }
-        };
-
-        executeTranscriptionTask(task, traceId, traceId != RecognitionTraceContext.NO_TRACE_ID, null);
-    }
-
-    private void executeTranscriptionTask(
-        Runnable task,
-        long traceId,
-        boolean whisperTask,
-        Runnable permanentRejectCleanup
-    ) {
-        try {
-            transcriptionExecutor.execute(task);
-            return;
-        } catch (RejectedExecutionException ex) {
-            if (whisperTask) {
-                logWhisperTrace(traceId, "queue.reject", "phase=initial " + describeExecutorState(transcriptionExecutor));
-            }
-            Log.w(TAG, "Transcription executor rejected task, recreating executor");
-        }
-
-        ensureTranscriptionExecutor();
-        if (transcriptionExecutor == null) {
-            if (permanentRejectCleanup != null) {
-                permanentRejectCleanup.run();
-            }
-            try { if (logManager != null) logManager.writeLog("Transcription投入失敗: executor unavailable", false); } catch (Exception ignored) {}
-            return;
-        }
-
-        try {
-            transcriptionExecutor.execute(task);
-        } catch (RejectedExecutionException ex) {
-            if (whisperTask) {
-                logWhisperTrace(traceId, "queue.reject", "phase=after-recreate " + describeExecutorState(transcriptionExecutor));
-            }
-            if (permanentRejectCleanup != null) {
-                permanentRejectCleanup.run();
-            }
-            Log.e(TAG, "Transcription task dropped after executor recreate", ex);
-            try { if (logManager != null) logManager.writeLog("Transcription投入失敗: " + ex.getMessage(), false); } catch (Exception ignored) {}
+            });
+        } catch (RuntimeException e) {
+            Log.e(TAG, "Failed to enqueue transcription task", e);
+            try { if (logManager != null) logManager.writeLog("Transcription投入失敗: " + e.getMessage(), false); } catch (Exception ignored) {}
         }
     }
 
@@ -1938,66 +1351,10 @@ public class VoiceListenerService extends Service {
         if (vad != null) {
             short[] flushed = vad.flush();
             if (flushed != null && flushed.length > 0) {
-                if (isWhisperActiveEngine()) {
-                    logWhisperTrace(
-                        RecognitionTraceContext.NO_TRACE_ID,
-                        "segment.flush",
-                        "samples=" + flushed.length
-                            + " segmentMs=" + samplesToMillis(flushed.length)
-                            + " flushReason=capture.stop"
-                    );
-                    submitWhisperWork(null, true, "capture.stop", flushed.length);
-                } else {
-                    submitForTranscription(flushed);
-                }
-            } else if (isWhisperActiveEngine()) {
-                submitWhisperWork(null, true, "capture.stop", 0);
+                submitForTranscription(flushed);
             }
         }
         try { if (sharedPrefs != null) sharedPrefs.edit().putFloat(PREF_CURRENT_RMS, 0f).apply(); } catch (Exception ignored) {}
-    }
-
-    private boolean isWhisperActiveEngine() {
-        return speechRecognizerFacade != null && speechRecognizerFacade.currentEngineType() == EngineType.WHISPER;
-    }
-
-    private void logWhisperTrace(long traceId, String stage, String details) {
-        String traceValue = traceId == RecognitionTraceContext.NO_TRACE_ID ? "none" : Long.toString(traceId);
-        logWhisperPerf("trace=" + traceValue + " stage=" + stage + " " + details);
-    }
-
-    private void logWhisperPerf(String message) {
-        WhisperPerfLogger.logLine(message);
-    }
-
-    private void appendRecognizedText(StringBuilder builder, String recognizedText) {
-        if (recognizedText == null || recognizedText.isEmpty()) {
-            return;
-        }
-        if (builder.length() > 0) {
-            builder.append(' ');
-        }
-        builder.append(recognizedText);
-    }
-
-    private static long nanosToMillis(long elapsedNs) {
-        return TimeUnit.NANOSECONDS.toMillis(elapsedNs);
-    }
-
-    private static long samplesToMillis(int sampleCount) {
-        if (sampleCount <= 0) {
-            return 0L;
-        }
-        return Math.round(sampleCount * 1000.0d / SAMPLE_RATE_HZ);
-    }
-
-    private static String describeExecutorState(ThreadPoolExecutor executor) {
-        if (executor == null) {
-            return "queue=na active=na completed=na";
-        }
-        return "queue=" + executor.getQueue().size()
-            + " active=" + executor.getActiveCount()
-            + " completed=" + executor.getCompletedTaskCount();
     }
 
     private AudioRecord createAudioRecord(int recordBufferBytes) {
@@ -2041,7 +1398,7 @@ public class VoiceListenerService extends Service {
 
     private void enableAudioEffects() {
         releaseAudioEffects();
-        enableAutomaticGainControl();
+        try { if (logManager != null) logManager.writeLog("AGC無効: 精度優先で背景雑音の持ち上がりを抑制", false); } catch (Exception ignored) {}
         enableAcousticEchoCanceler();
         enableNoiseSuppressor();
     }

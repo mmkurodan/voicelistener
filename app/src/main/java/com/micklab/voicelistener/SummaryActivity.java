@@ -4,9 +4,13 @@ import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
+import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
 import android.text.method.ScrollingMovementMethod;
 import android.view.View;
 import android.widget.Button;
@@ -25,6 +29,9 @@ public class SummaryActivity extends Activity {
     private Runnable periodicUpdateRunnable;
     private TextView summaryStatusText;
     private EditText summaryText;
+    private Button refreshSummaryButton;
+    private boolean applyingSummaryText = false;
+    private String lastAppliedSummaryText = "";
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -63,8 +70,30 @@ public class SummaryActivity extends Activity {
         });
         actionRow.addView(clearButton);
 
+        refreshSummaryButton = createActionButton("要約更新");
+        refreshSummaryButton.setOnClickListener(v -> requestManualSummaryRefresh());
+        actionRow.addView(refreshSummaryButton);
+
         root.addView(createSectionLabel("要約"));
-        summaryText = createReadOnlyTextArea();
+        summaryText = createEditableTextArea();
+        summaryText.setHint("要約はまだありません");
+        summaryText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                if (applyingSummaryText) {
+                    return;
+                }
+                LiveSummaryStore.saveEditedSummary(SummaryActivity.this, s == null ? "" : s.toString());
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+            }
+        });
         root.addView(summaryText);
 
         setContentView(root);
@@ -89,19 +118,18 @@ public class SummaryActivity extends Activity {
         return label;
     }
 
-    private EditText createReadOnlyTextArea() {
+    private EditText createEditableTextArea() {
         EditText output = new EditText(this);
         output.setTextSize(15);
         output.setBackgroundColor(0xFFF3F3F3);
         output.setTextColor(0xFF111111);
         output.setPadding(10, 10, 10, 10);
-        output.setKeyListener(null);
-        output.setCursorVisible(false);
+        output.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        output.setGravity(android.view.Gravity.TOP | android.view.Gravity.START);
+        output.setCursorVisible(true);
         output.setLongClickable(true);
-        output.setTextIsSelectable(true);
         output.setFocusable(true);
         output.setFocusableInTouchMode(true);
-        output.setShowSoftInputOnFocus(false);
         output.setHorizontallyScrolling(false);
         output.setVerticalScrollBarEnabled(true);
         output.setMovementMethod(ScrollingMovementMethod.getInstance());
@@ -119,7 +147,19 @@ public class SummaryActivity extends Activity {
             return;
         }
         LiveSummaryState state = LiveSummaryStore.loadSummaryState(this);
-        summaryText.setText(SummaryTextFormatter.formatSummary(state.getSummary()));
+        String persistedSummary = state.getSummary();
+        String currentEditorText = String.valueOf(summaryText.getText());
+        boolean shouldReplaceEditorText = !summaryText.hasFocus() || currentEditorText.equals(lastAppliedSummaryText);
+        if (shouldReplaceEditorText && !persistedSummary.equals(currentEditorText)) {
+            applyingSummaryText = true;
+            summaryText.setText(persistedSummary);
+            summaryText.setSelection(summaryText.length());
+            applyingSummaryText = false;
+            lastAppliedSummaryText = persistedSummary;
+        }
+        if (!summaryText.hasFocus()) {
+            lastAppliedSummaryText = persistedSummary;
+        }
 
         String status = state.getStatus().isEmpty() ? "要約待機中" : state.getStatus();
         int pendingChars = LiveSummaryStore.getPendingSummaryLogCharCount(this);
@@ -129,7 +169,11 @@ public class SummaryActivity extends Activity {
         if (state.getUpdatedAtMillis() > 0L) {
             status = status + " (" + summaryTimeFormat.format(new java.util.Date(state.getUpdatedAtMillis())) + ")";
         }
-        summaryStatusText.setText("要約状態: " + status);
+        SummaryUpdateMode updateMode = LiveSummaryStore.getSummaryUpdateMode(this);
+        summaryStatusText.setText("要約モード: " + updateMode.getDisplayName() + " / 要約状態: " + status);
+        if (refreshSummaryButton != null) {
+            refreshSummaryButton.setEnabled(updateMode == SummaryUpdateMode.MANUAL);
+        }
     }
 
     private void copyAllSummaryText() {
@@ -139,8 +183,39 @@ public class SummaryActivity extends Activity {
             return;
         }
         LiveSummaryState state = LiveSummaryStore.loadSummaryState(this);
-        clipboardManager.setPrimaryClip(ClipData.newPlainText("summary", SummaryTextFormatter.buildCopyText(state)));
+        LiveSummaryState currentState = new LiveSummaryState(
+            String.valueOf(summaryText.getText()),
+            state.getDecisions(),
+            state.getTodos(),
+            state.getStatus(),
+            state.getUpdatedAtMillis()
+        );
+        clipboardManager.setPrimaryClip(ClipData.newPlainText("summary", SummaryTextFormatter.buildCopyText(currentState)));
         Toast.makeText(this, "要約をコピーしました", Toast.LENGTH_SHORT).show();
+    }
+
+    private void persistSummaryText() {
+        if (summaryText == null) {
+            return;
+        }
+        LiveSummaryStore.saveEditedSummary(this, String.valueOf(summaryText.getText()));
+    }
+
+    private void requestManualSummaryRefresh() {
+        if (LiveSummaryStore.getSummaryUpdateMode(this) != SummaryUpdateMode.MANUAL) {
+            Toast.makeText(this, "手動更新モードで利用できます", Toast.LENGTH_SHORT).show();
+            return;
+        }
+        persistSummaryText();
+        Intent intent = new Intent(this, VoiceListenerService.class);
+        intent.setAction(VoiceListenerService.ACTION_REFRESH_SUMMARY);
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
+            startForegroundService(intent);
+        } else {
+            startService(intent);
+        }
+        Toast.makeText(this, "要約更新を要求しました", Toast.LENGTH_SHORT).show();
+        updateSummaryDisplay();
     }
 
     @Override
@@ -168,6 +243,7 @@ public class SummaryActivity extends Activity {
     @Override
     protected void onPause() {
         super.onPause();
+        persistSummaryText();
         if (uiHandler != null && periodicUpdateRunnable != null) {
             uiHandler.removeCallbacks(periodicUpdateRunnable);
         }

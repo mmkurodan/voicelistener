@@ -243,7 +243,6 @@ public class LogManager2 {
             "監視",
             "保留処理",
             "Transcription",
-            "WhisperPerf",
             "要約",
             "Ollama"
         };

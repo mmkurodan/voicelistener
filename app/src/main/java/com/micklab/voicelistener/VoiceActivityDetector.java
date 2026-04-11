@@ -5,10 +5,11 @@ import java.util.ArrayList;
 import java.util.Deque;
 
 public class VoiceActivityDetector {
-    private static final int PRE_SPEECH_FRAMES = 6;
+    private static final int PRE_SPEECH_FRAMES = 12;
+    private static final int START_SPEECH_FRAMES = 2;
     private static final int DEFAULT_MAX_CONTINUOUS_SPEECH_FRAMES = 64;
-    private static final double NOISE_FLOOR_ALPHA = 0.08;
-    private static final double DYNAMIC_THRESHOLD_MULTIPLIER = 1.8;
+    private static final double NOISE_FLOOR_ALPHA = 0.04;
+    private static final double DYNAMIC_THRESHOLD_MULTIPLIER = 2.4;
 
     private double rmsThreshold;
     private final int maxSilenceFrames;
@@ -16,8 +17,10 @@ public class VoiceActivityDetector {
     private final int maxContinuousSpeechFrames;
 
     private final ArrayList<short[]> bufferedFrames = new ArrayList<>();
+    private final ArrayList<short[]> speechCandidateFrames = new ArrayList<>();
     private final Deque<short[]> preSpeechFrames = new ArrayDeque<>();
     private int speechFrames = 0;
+    private int speechCandidateFrameCount = 0;
     private int silenceFrames = 0;
     private boolean inSpeech = false;
     private double noiseFloorRms;
@@ -53,25 +56,37 @@ public class VoiceActivityDetector {
         double frameRms = computeRms(frame);
         double effectiveThreshold = getEffectiveThreshold();
         boolean isSpeech = frameRms >= effectiveThreshold;
+        boolean enteredSpeech = false;
 
         if (!inSpeech) {
             updateNoiseFloor(frameRms, effectiveThreshold);
-            rememberPreSpeechFrame(frame);
             if (!isSpeech) {
+                rememberPreSpeechFrame(frame);
+                clearSpeechCandidates();
+                return null;
+            }
+            speechCandidateFrames.add(frame);
+            speechCandidateFrameCount++;
+            if (speechCandidateFrameCount < START_SPEECH_FRAMES) {
                 return null;
             }
             inSpeech = true;
+            enteredSpeech = true;
             bufferedFrames.clear();
             bufferedFrames.addAll(preSpeechFrames);
+            bufferedFrames.addAll(speechCandidateFrames);
             preSpeechFrames.clear();
-            speechFrames = 0;
+            speechFrames = speechCandidateFrameCount;
+            clearSpeechCandidates();
             silenceFrames = 0;
         } else {
             bufferedFrames.add(frame);
         }
 
         if (isSpeech) {
-            speechFrames++;
+            if (!enteredSpeech) {
+                speechFrames++;
+            }
             silenceFrames = 0;
         } else {
             silenceFrames++;
@@ -97,6 +112,7 @@ public class VoiceActivityDetector {
     private void reset() {
         bufferedFrames.clear();
         preSpeechFrames.clear();
+        clearSpeechCandidates();
         speechFrames = 0;
         silenceFrames = 0;
         inSpeech = false;
@@ -105,9 +121,15 @@ public class VoiceActivityDetector {
     private short[] emitBufferedSegmentAndContinue() {
         short[] segment = speechFrames >= minSpeechFrames ? concatFrames(bufferedFrames) : null;
         bufferedFrames.clear();
+        clearSpeechCandidates();
         speechFrames = 0;
         silenceFrames = 0;
         return segment;
+    }
+
+    private void clearSpeechCandidates() {
+        speechCandidateFrames.clear();
+        speechCandidateFrameCount = 0;
     }
 
     private void rememberPreSpeechFrame(short[] frame) {

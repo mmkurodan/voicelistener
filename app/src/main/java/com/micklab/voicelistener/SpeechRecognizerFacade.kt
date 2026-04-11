@@ -1,8 +1,7 @@
 package com.micklab.voicelistener
 
-import kotlin.concurrent.withLock
-import java.util.concurrent.TimeUnit
 import java.util.concurrent.locks.ReentrantLock
+import kotlin.concurrent.withLock
 
 class SpeechRecognizerFacade @JvmOverloads constructor(
     private val engineFactory: SpeechRecognizerEngineFactory = DefaultSpeechRecognizerEngineFactory()
@@ -49,52 +48,18 @@ class SpeechRecognizerFacade @JvmOverloads constructor(
     }
 
     fun transcribe(buffer: ShortArray): String {
-        val enteredNs = System.nanoTime()
         return lock.withLock {
-            val lockWaitMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - enteredNs)
-            val engineType = currentEngineType
             if (buffer.isEmpty()) {
-                if (engineType == EngineType.WHISPER) {
-                    logWhisperPerf(
-                        "facade.transcribe.skip",
-                        "engineType=$engineType samples=0 lockWaitMs=$lockWaitMs started=$started"
-                    )
-                }
                 return ""
             }
-            val delegateStartedNs = System.nanoTime()
-            val result = currentEngine.transcribe(buffer)
-            if (engineType == EngineType.WHISPER) {
-                val delegateMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - delegateStartedNs)
-                logWhisperPerf(
-                    "facade.transcribe",
-                    "engineType=$engineType samples=${buffer.size} chars=${result.length} lockWaitMs=$lockWaitMs delegateMs=$delegateMs started=$started"
-                )
-            }
-            result
+            currentEngine.transcribe(buffer)
         }
     }
 
     fun flush(): String {
-        val enteredNs = System.nanoTime()
         return lock.withLock {
-            val lockWaitMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - enteredNs)
-            val engineType = currentEngineType
-            val delegateStartedNs = System.nanoTime()
-            val result = currentEngine.flush()
-            if (engineType == EngineType.WHISPER) {
-                val delegateMs = TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - delegateStartedNs)
-                logWhisperPerf(
-                    "facade.flush",
-                    "engineType=$engineType chars=${result.length} lockWaitMs=$lockWaitMs delegateMs=$delegateMs started=$started"
-                )
-            }
-            result
+            currentEngine.flush()
         }
-    }
-
-    private fun logWhisperPerf(stage: String, details: String) {
-        WhisperPerfLogger.logTrace(RecognitionTraceContext.currentId(), stage, details)
     }
 
     fun release() {

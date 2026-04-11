@@ -26,9 +26,10 @@ public class VoiceActivityDetectorTest {
 
     @Test
     public void processFrame_discardsTooShortSpeech() {
-        VoiceActivityDetector detector = new VoiceActivityDetector(100.0, 1, 2);
+        VoiceActivityDetector detector = new VoiceActivityDetector(100.0, 1, 3);
 
         assertNull(detector.processFrame(frame(220, 220)));
+        assertNull(detector.processFrame(frame(230, 230)));
         assertNull(detector.processFrame(frame(10, 10)));
         assertNull(detector.flush());
     }
@@ -54,6 +55,15 @@ public class VoiceActivityDetectorTest {
         assertEquals(6, secondChunk.length);
         assertEquals(230, secondChunk[0]);
         assertEquals(250, secondChunk[4]);
+    }
+
+    @Test
+    public void processFrame_ignoresSingleFrameNoiseBurst() {
+        VoiceActivityDetector detector = new VoiceActivityDetector(100.0, 1, 1);
+
+        assertNull(detector.processFrame(frame(220, 220)));
+        assertNull(detector.processFrame(frame(10, 10)));
+        assertNull(detector.flush());
     }
 
     private short[] frame(int first, int second) {

@@ -1,8 +1,7 @@
 package com.micklab.voicelistener
 
 enum class EngineType(val displayName: String) {
-    VOSK("VOSK"),
-    WHISPER("Whisper");
+    VOSK("VOSK");
 
     companion object {
         @JvmStatic

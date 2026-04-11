@@ -19,6 +19,7 @@ public final class LiveSummaryStore {
     private static final String PREF_PENDING_SUMMARY_LOGS = "pending_summary_logs";
     private static final String PREF_SUMMARY_FORCE_CHAR_THRESHOLD = "summary_force_char_threshold";
     private static final String PREF_SUMMARY_REVISION = "summary_revision";
+    private static final String PREF_SUMMARY_UPDATE_MODE = "summary_update_mode";
     private static final int DEFAULT_SUMMARY_FORCE_CHAR_THRESHOLD = 1200;
 
     private LiveSummaryStore() {
@@ -101,6 +102,20 @@ public final class LiveSummaryStore {
             .apply();
     }
 
+    public static void saveEditedSummary(Context context, String summaryText) {
+        LiveSummaryState currentState = loadSummaryState(context);
+        saveSummaryState(
+            context,
+            new LiveSummaryState(
+                summaryText,
+                currentState.getDecisions(),
+                currentState.getTodos(),
+                currentState.getStatus(),
+                currentState.getUpdatedAtMillis()
+            )
+        );
+    }
+
     public static OllamaDebugState loadOllamaDebugState(Context context) {
         return OllamaDebugState.fromJsonString(getPrefs(context).getString(PREF_OLLAMA_DEBUG_JSON, null));
     }
@@ -159,6 +174,19 @@ public final class LiveSummaryStore {
     public static void setSummaryForceCharThreshold(Context context, int charCount) {
         getPrefs(context).edit()
             .putInt(PREF_SUMMARY_FORCE_CHAR_THRESHOLD, normalizeSummaryForceCharThreshold(charCount))
+            .apply();
+    }
+
+    public static SummaryUpdateMode getSummaryUpdateMode(Context context) {
+        return SummaryUpdateMode.fromPreference(
+            getPrefs(context).getString(PREF_SUMMARY_UPDATE_MODE, null)
+        );
+    }
+
+    public static void setSummaryUpdateMode(Context context, SummaryUpdateMode mode) {
+        SummaryUpdateMode safeMode = mode == null ? SummaryUpdateMode.AUTO : mode;
+        getPrefs(context).edit()
+            .putString(PREF_SUMMARY_UPDATE_MODE, safeMode.name())
             .apply();
     }
 

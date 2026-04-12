@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.micklab.voicelistener.LiveSummaryStateTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-04-12T01:40:48" hostname="localhost" time="0.014">
+<testsuite name="com.micklab.voicelistener.LiveSummaryStateTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-04-12T20:38:57" hostname="localhost" time="0.011">
   <properties/>
-  <testcase name="toJsonAndBack_preservesNormalizedContent" classname="com.micklab.voicelistener.LiveSummaryStateTest" time="0.012"/>
+  <testcase name="toJsonAndBack_preservesNormalizedContent" classname="com.micklab.voicelistener.LiveSummaryStateTest" time="0.009"/>
   <testcase name="fromInvalidJson_returnsEmptyState" classname="com.micklab.voicelistener.LiveSummaryStateTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

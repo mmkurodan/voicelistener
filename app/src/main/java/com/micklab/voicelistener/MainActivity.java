@@ -61,7 +61,7 @@ public class MainActivity extends Activity {
     private Runnable indicatorUpdateRunnable;
     private static final int UPDATE_INTERVAL_MS = 5000; // 5s
     private static final int INDICATOR_UPDATE_INTERVAL_MS = 250;
-    private static final int VAD_MIN = 100;
+    private static final int VAD_MIN = 0;
     private static final int VAD_MAX = 5000;
 
     private LogManager2 logManager;

@@ -7,6 +7,9 @@ import android.content.Context;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.text.Editable;
+import android.text.InputType;
+import android.text.TextWatcher;
 import android.text.method.ScrollingMovementMethod;
 import android.view.View;
 import android.widget.Button;
@@ -24,6 +27,7 @@ public class OllamaDebugActivity extends Activity {
     private Handler uiHandler;
     private Runnable periodicUpdateRunnable;
     private TextView statusText;
+    private EditText promptTemplateText;
     private EditText historyText;
 
     @Override
@@ -55,6 +59,46 @@ public class OllamaDebugActivity extends Activity {
         copyAllButton.setOnClickListener(v -> copyAllText());
         actionRow.addView(copyAllButton);
 
+        root.addView(createSectionLabel("要約プロンプト"));
+
+        TextView promptTemplateHint = new TextView(this);
+        promptTemplateHint.setText(
+            "利用可能プレースホルダ: "
+                + OllamaClient.SUMMARY_PROMPT_PLACEHOLDER_PREVIOUS_SUMMARY
+                + " / "
+                + OllamaClient.SUMMARY_PROMPT_PLACEHOLDER_NEW_LOGS
+        );
+        promptTemplateHint.setTextSize(12);
+        promptTemplateHint.setPadding(0, 0, 0, 8);
+        root.addView(promptTemplateHint);
+
+        Button resetPromptButton = new Button(this);
+        resetPromptButton.setText("プロンプトを初期化");
+        resetPromptButton.setOnClickListener(v -> resetSummaryPromptTemplate());
+        root.addView(resetPromptButton);
+
+        promptTemplateText = createEditableTextArea(280, 0f);
+        promptTemplateText.setHint("要約プロンプト");
+        promptTemplateText.setText(LiveSummaryStore.getSummaryPromptTemplate(this));
+        promptTemplateText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                LiveSummaryStore.setSummaryPromptTemplate(
+                    OllamaDebugActivity.this,
+                    s == null ? "" : s.toString()
+                );
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+            }
+        });
+        root.addView(promptTemplateText);
+
         root.addView(createSectionLabel("履歴"));
         historyText = createReadOnlyTextArea();
         root.addView(historyText);
@@ -79,6 +123,36 @@ public class OllamaDebugActivity extends Activity {
         label.setText(text);
         label.setPadding(0, 0, 0, 8);
         return label;
+    }
+
+    private EditText createEditableTextArea(int heightPx, float weight) {
+        EditText output = new EditText(this);
+        output.setTextSize(15);
+        output.setBackgroundColor(0xFFF3F3F3);
+        output.setTextColor(0xFF111111);
+        output.setPadding(10, 10, 10, 10);
+        output.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
+        output.setGravity(android.view.Gravity.TOP | android.view.Gravity.START);
+        output.setCursorVisible(true);
+        output.setLongClickable(true);
+        output.setTextIsSelectable(true);
+        output.setFocusable(true);
+        output.setFocusableInTouchMode(true);
+        output.setHorizontallyScrolling(false);
+        output.setVerticalScrollBarEnabled(true);
+        output.setMovementMethod(ScrollingMovementMethod.getInstance());
+        output.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
+        output.setLayoutParams(weight > 0f
+            ? new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                weight
+            )
+            : new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                heightPx
+            ));
+        return output;
     }
 
     private EditText createReadOnlyTextArea() {
@@ -110,6 +184,14 @@ public class OllamaDebugActivity extends Activity {
         if (statusText == null || historyText == null) {
             return;
         }
+        if (promptTemplateText != null && !promptTemplateText.hasFocus()) {
+            String savedPrompt = LiveSummaryStore.getSummaryPromptTemplate(this);
+            String currentPrompt = String.valueOf(promptTemplateText.getText());
+            if (!savedPrompt.equals(currentPrompt)) {
+                promptTemplateText.setText(savedPrompt);
+                promptTemplateText.setSelection(promptTemplateText.length());
+            }
+        }
         OllamaDebugState state = LiveSummaryStore.loadOllamaDebugState(this);
         historyText.setText(formatText(state.getHistory(), "まだ履歴はありません"));
 
@@ -129,6 +211,15 @@ public class OllamaDebugActivity extends Activity {
     private String formatText(String value, String emptyMessage) {
         String normalized = value == null ? "" : value.trim();
         return normalized.isEmpty() ? emptyMessage : normalized;
+    }
+
+    private void resetSummaryPromptTemplate() {
+        if (promptTemplateText == null) {
+            return;
+        }
+        promptTemplateText.setText(OllamaClient.DEFAULT_SUMMARY_PROMPT_TEMPLATE);
+        promptTemplateText.setSelection(promptTemplateText.length());
+        Toast.makeText(this, "要約プロンプトを初期化しました", Toast.LENGTH_SHORT).show();
     }
 
     private void copyAllText() {

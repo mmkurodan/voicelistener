@@ -27,23 +27,16 @@ public class OllamaClient {
     private static final int MAX_LOG_CONTEXT_CHARS = 6000;
     public static final String SUMMARY_PROMPT_PLACEHOLDER_PREVIOUS_SUMMARY = "{{previous_summary}}";
     public static final String SUMMARY_PROMPT_PLACEHOLDER_NEW_LOGS = "{{new_recognition_logs}}";
-    public static final String DEFAULT_SUMMARY_PROMPT_TEMPLATE = "あなたは会議要約更新アシスタントです。\n"
-        + "以下の前回要約と新規認識ログ差分を使って、会議全体の要約を更新してください。\n"
+    public static final String DEFAULT_SUMMARY_PROMPT_TEMPLATE = "あなたは会議要約アシスタントです。\n"
+        + "会議内容の要約をしてください。\n"
         + "決定事項やToDoは配列で個別に返さず、重要であればsummary本文の中で自然に触れてください。\n"
+        + "\n"
         + "必ずJSONオブジェクトのみを返してください。説明文は不要です。\n"
-        + "形式:\n"
-        + "{\"summary\":\"更新後の全文要約\"}\n"
-        + "ルール:\n"
-        + "- 事実のみを書く。\n"
-        + "- summaryは前回要約を引き継ぎつつ、新規ログ差分を反映した最新の全体要約にする。\n"
-        + "- 決定事項・未完了ToDo・懸念点などの重要事項はsummary本文の中で必要なだけ自然に触れる。\n"
-        + "- 前回要約を削除・修正するのは、新規ログにより明確な矛盾・撤回・完了が確認できる場合のみにする。\n"
-        + "- 新規ログに根拠がない内容は追加しない。\n"
-        + "- 固有名詞や数値は認識ログに現れた内容を優先する。\n"
-        + "- 情報が不足する場合は空文字にする。\n"
-        + "前回の要約:\n"
+        + "形式: {\"summary\":\"更新後の全文要約\"}\n"
+        + "\n"
+        + "\n"
         + SUMMARY_PROMPT_PLACEHOLDER_PREVIOUS_SUMMARY
-        + "\n新規認識ログ差分:\n"
+        + "\n"
         + SUMMARY_PROMPT_PLACEHOLDER_NEW_LOGS;
 
     public static final class SummaryGenerationResult {

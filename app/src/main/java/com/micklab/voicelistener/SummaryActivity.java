@@ -1,9 +1,6 @@
 package com.micklab.voicelistener;
 
 import android.app.Activity;
-import android.content.ClipData;
-import android.content.ClipboardManager;
-import android.content.Context;
 import android.content.Intent;
 import android.os.Bundle;
 import android.os.Handler;
@@ -28,7 +25,6 @@ public class SummaryActivity extends Activity {
     private Handler uiHandler;
     private Runnable periodicUpdateRunnable;
     private TextView summaryStatusText;
-    private EditText promptTemplateText;
     private EditText summaryText;
     private Button refreshSummaryButton;
     private boolean applyingSummaryText = false;
@@ -59,10 +55,6 @@ public class SummaryActivity extends Activity {
         closeButton.setOnClickListener(v -> finish());
         actionRow.addView(closeButton);
 
-        Button copyAllButton = createActionButton("全文コピー");
-        copyAllButton.setOnClickListener(v -> copyAllSummaryText());
-        actionRow.addView(copyAllButton);
-
         Button clearButton = createActionButton("クリア");
         clearButton.setOnClickListener(v -> {
             LiveSummaryStore.clearSummarySession(this);
@@ -74,46 +66,6 @@ public class SummaryActivity extends Activity {
         refreshSummaryButton = createActionButton("要約実行");
         refreshSummaryButton.setOnClickListener(v -> requestManualSummaryRefresh());
         actionRow.addView(refreshSummaryButton);
-
-        root.addView(createSectionLabel("要約プロンプト"));
-
-        TextView promptTemplateHint = new TextView(this);
-        promptTemplateHint.setText(
-            "利用可能プレースホルダ: "
-                + OllamaClient.SUMMARY_PROMPT_PLACEHOLDER_PREVIOUS_SUMMARY
-                + " / "
-                + OllamaClient.SUMMARY_PROMPT_PLACEHOLDER_NEW_LOGS
-        );
-        promptTemplateHint.setTextSize(12);
-        promptTemplateHint.setPadding(0, 0, 0, 8);
-        root.addView(promptTemplateHint);
-
-        Button resetPromptButton = new Button(this);
-        resetPromptButton.setText("プロンプトを初期化");
-        resetPromptButton.setOnClickListener(v -> resetSummaryPromptTemplate());
-        root.addView(resetPromptButton);
-
-        promptTemplateText = createEditableTextArea(280, 0f);
-        promptTemplateText.setHint("要約プロンプト");
-        promptTemplateText.setText(LiveSummaryStore.getSummaryPromptTemplate(this));
-        promptTemplateText.addTextChangedListener(new TextWatcher() {
-            @Override
-            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
-            }
-
-            @Override
-            public void onTextChanged(CharSequence s, int start, int before, int count) {
-                LiveSummaryStore.setSummaryPromptTemplate(
-                    SummaryActivity.this,
-                    s == null ? "" : s.toString()
-                );
-            }
-
-            @Override
-            public void afterTextChanged(Editable s) {
-            }
-        });
-        root.addView(promptTemplateText);
 
         root.addView(createSectionLabel("要約"));
         summaryText = createEditableTextArea(0, 1f);
@@ -169,6 +121,7 @@ public class SummaryActivity extends Activity {
         output.setGravity(android.view.Gravity.TOP | android.view.Gravity.START);
         output.setCursorVisible(true);
         output.setLongClickable(true);
+        output.setTextIsSelectable(true);
         output.setFocusable(true);
         output.setFocusableInTouchMode(true);
         output.setHorizontallyScrolling(false);
@@ -219,24 +172,6 @@ public class SummaryActivity extends Activity {
         summaryStatusText.setText("要約モード: " + updateMode.getDisplayName() + " / 要約状態: " + status);
     }
 
-    private void copyAllSummaryText() {
-        ClipboardManager clipboardManager = (ClipboardManager) getSystemService(Context.CLIPBOARD_SERVICE);
-        if (clipboardManager == null) {
-            Toast.makeText(this, "クリップボードにアクセスできません", Toast.LENGTH_SHORT).show();
-            return;
-        }
-        LiveSummaryState state = LiveSummaryStore.loadSummaryState(this);
-        LiveSummaryState currentState = new LiveSummaryState(
-            String.valueOf(summaryText.getText()),
-            state.getDecisions(),
-            state.getTodos(),
-            state.getStatus(),
-            state.getUpdatedAtMillis()
-        );
-        clipboardManager.setPrimaryClip(ClipData.newPlainText("summary", SummaryTextFormatter.buildCopyText(currentState)));
-        Toast.makeText(this, "要約をコピーしました", Toast.LENGTH_SHORT).show();
-    }
-
     private void persistSummaryText() {
         if (summaryText == null) {
             return;
@@ -244,25 +179,8 @@ public class SummaryActivity extends Activity {
         LiveSummaryStore.saveEditedSummary(this, String.valueOf(summaryText.getText()));
     }
 
-    private void persistSummaryPromptTemplate() {
-        if (promptTemplateText == null) {
-            return;
-        }
-        LiveSummaryStore.setSummaryPromptTemplate(this, String.valueOf(promptTemplateText.getText()));
-    }
-
-    private void resetSummaryPromptTemplate() {
-        if (promptTemplateText == null) {
-            return;
-        }
-        promptTemplateText.setText(OllamaClient.DEFAULT_SUMMARY_PROMPT_TEMPLATE);
-        promptTemplateText.setSelection(promptTemplateText.length());
-        Toast.makeText(this, "要約プロンプトを初期化しました", Toast.LENGTH_SHORT).show();
-    }
-
     private void requestManualSummaryRefresh() {
         persistSummaryText();
-        persistSummaryPromptTemplate();
         Intent intent = new Intent(this, VoiceListenerService.class);
         intent.setAction(VoiceListenerService.ACTION_REFRESH_SUMMARY);
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -300,7 +218,6 @@ public class SummaryActivity extends Activity {
     protected void onPause() {
         super.onPause();
         persistSummaryText();
-        persistSummaryPromptTemplate();
         if (uiHandler != null && periodicUpdateRunnable != null) {
             uiHandler.removeCallbacks(periodicUpdateRunnable);
         }

@@ -20,6 +20,7 @@ public final class LiveSummaryStore {
     private static final String PREF_SUMMARY_FORCE_CHAR_THRESHOLD = "summary_force_char_threshold";
     private static final String PREF_SUMMARY_REVISION = "summary_revision";
     private static final String PREF_SUMMARY_UPDATE_MODE = "summary_update_mode";
+    private static final String PREF_SUMMARY_PROMPT_TEMPLATE = "summary_prompt_template";
     private static final int DEFAULT_SUMMARY_FORCE_CHAR_THRESHOLD = 1200;
 
     private LiveSummaryStore() {
@@ -88,6 +89,17 @@ public final class LiveSummaryStore {
         }
         getPrefs(context).edit()
             .putString(PREF_OLLAMA_MODELS_JSON, array.toString())
+            .apply();
+    }
+
+    public static String getSummaryPromptTemplate(Context context) {
+        String raw = getPrefs(context).getString(PREF_SUMMARY_PROMPT_TEMPLATE, null);
+        return raw == null ? OllamaClient.DEFAULT_SUMMARY_PROMPT_TEMPLATE : normalizePromptTemplate(raw);
+    }
+
+    public static void setSummaryPromptTemplate(Context context, String promptTemplate) {
+        getPrefs(context).edit()
+            .putString(PREF_SUMMARY_PROMPT_TEMPLATE, normalizePromptTemplate(promptTemplate))
             .apply();
     }
 
@@ -234,6 +246,12 @@ public final class LiveSummaryStore {
     private static String normalizeModel(String model) {
         String trimmed = model == null ? "" : model.trim();
         return trimmed.isEmpty() ? "default" : trimmed;
+    }
+
+    private static String normalizePromptTemplate(String promptTemplate) {
+        return promptTemplate == null ? "" : promptTemplate
+            .replace("\r\n", "\n")
+            .replace('\r', '\n');
     }
 
     private static int normalizeSummaryForceCharThreshold(int charCount) {

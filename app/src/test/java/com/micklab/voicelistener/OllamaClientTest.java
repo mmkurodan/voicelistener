@@ -1,8 +1,10 @@
 package com.micklab.voicelistener;
 
 import java.util.Arrays;
+import java.util.Collections;
 import org.junit.Test;
 
+import static org.junit.Assert.assertEquals;
 import static org.junit.Assert.assertFalse;
 import static org.junit.Assert.assertTrue;
 
@@ -28,5 +30,20 @@ public class OllamaClientTest {
         assertTrue(prompt.contains("新規認識ログ差分:\n新しい発話ログ"));
         assertFalse(prompt.contains("既存の決定事項:"));
         assertFalse(prompt.contains("既存のToDo:"));
+    }
+
+    @Test
+    public void buildSummaryPrompt_replacesEditableTemplatePlaceholders() {
+        OllamaClient client = new OllamaClient();
+        String prompt = client.buildSummaryPrompt(
+            "新しい発話ログ",
+            new LiveSummaryState("", Collections.emptyList(), Collections.emptyList(), "要約待機中", 0L),
+            "前回:\n"
+                + OllamaClient.SUMMARY_PROMPT_PLACEHOLDER_PREVIOUS_SUMMARY
+                + "\n差分:\n"
+                + OllamaClient.SUMMARY_PROMPT_PLACEHOLDER_NEW_LOGS
+        );
+
+        assertEquals("前回:\n（なし）\n差分:\n新しい発話ログ", prompt);
     }
 }

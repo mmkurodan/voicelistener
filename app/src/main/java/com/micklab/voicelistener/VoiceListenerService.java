@@ -863,7 +863,7 @@ public class VoiceListenerService extends Service {
                 }
                 saveSummaryStateWithStatus(
                     previousState,
-                    LiveSummaryStore.getSummaryUpdateMode(this) == SummaryUpdateMode.MANUAL ? "未要約ログなし" : "要約待機中"
+                    "未要約ログなし"
                 );
             }
             return;
@@ -872,7 +872,11 @@ public class VoiceListenerService extends Service {
         try {
             String baseUrl = LiveSummaryStore.getOllamaBaseUrl(this);
             String model = LiveSummaryStore.getOllamaModel(this);
-            String prompt = ollamaClient.buildSummaryPrompt(pendingLogs, previousState);
+            String prompt = ollamaClient.buildSummaryPrompt(
+                pendingLogs,
+                previousState,
+                LiveSummaryStore.getSummaryPromptTemplate(this)
+            );
             long requestStartedAt = System.currentTimeMillis();
             if (LiveSummaryStore.getSummaryRevision(this) != summaryRevision) {
                 return;

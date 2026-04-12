@@ -28,6 +28,7 @@ public class SummaryActivity extends Activity {
     private Handler uiHandler;
     private Runnable periodicUpdateRunnable;
     private TextView summaryStatusText;
+    private EditText promptTemplateText;
     private EditText summaryText;
     private Button refreshSummaryButton;
     private boolean applyingSummaryText = false;
@@ -70,12 +71,52 @@ public class SummaryActivity extends Activity {
         });
         actionRow.addView(clearButton);
 
-        refreshSummaryButton = createActionButton("要約更新");
+        refreshSummaryButton = createActionButton("要約実行");
         refreshSummaryButton.setOnClickListener(v -> requestManualSummaryRefresh());
         actionRow.addView(refreshSummaryButton);
 
+        root.addView(createSectionLabel("要約プロンプト"));
+
+        TextView promptTemplateHint = new TextView(this);
+        promptTemplateHint.setText(
+            "利用可能プレースホルダ: "
+                + OllamaClient.SUMMARY_PROMPT_PLACEHOLDER_PREVIOUS_SUMMARY
+                + " / "
+                + OllamaClient.SUMMARY_PROMPT_PLACEHOLDER_NEW_LOGS
+        );
+        promptTemplateHint.setTextSize(12);
+        promptTemplateHint.setPadding(0, 0, 0, 8);
+        root.addView(promptTemplateHint);
+
+        Button resetPromptButton = new Button(this);
+        resetPromptButton.setText("プロンプトを初期化");
+        resetPromptButton.setOnClickListener(v -> resetSummaryPromptTemplate());
+        root.addView(resetPromptButton);
+
+        promptTemplateText = createEditableTextArea(280, 0f);
+        promptTemplateText.setHint("要約プロンプト");
+        promptTemplateText.setText(LiveSummaryStore.getSummaryPromptTemplate(this));
+        promptTemplateText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {
+            }
+
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {
+                LiveSummaryStore.setSummaryPromptTemplate(
+                    SummaryActivity.this,
+                    s == null ? "" : s.toString()
+                );
+            }
+
+            @Override
+            public void afterTextChanged(Editable s) {
+            }
+        });
+        root.addView(promptTemplateText);
+
         root.addView(createSectionLabel("要約"));
-        summaryText = createEditableTextArea();
+        summaryText = createEditableTextArea(0, 1f);
         summaryText.setHint("要約はまだありません");
         summaryText.addTextChangedListener(new TextWatcher() {
             @Override
@@ -118,7 +159,7 @@ public class SummaryActivity extends Activity {
         return label;
     }
 
-    private EditText createEditableTextArea() {
+    private EditText createEditableTextArea(int heightPx, float weight) {
         EditText output = new EditText(this);
         output.setTextSize(15);
         output.setBackgroundColor(0xFFF3F3F3);
@@ -134,11 +175,16 @@ public class SummaryActivity extends Activity {
         output.setVerticalScrollBarEnabled(true);
         output.setMovementMethod(ScrollingMovementMethod.getInstance());
         output.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
-        output.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            0,
-            1f
-        ));
+        output.setLayoutParams(weight > 0f
+            ? new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                0,
+                weight
+            )
+            : new LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                heightPx
+            ));
         return output;
     }
 
@@ -171,9 +217,6 @@ public class SummaryActivity extends Activity {
         }
         SummaryUpdateMode updateMode = LiveSummaryStore.getSummaryUpdateMode(this);
         summaryStatusText.setText("要約モード: " + updateMode.getDisplayName() + " / 要約状態: " + status);
-        if (refreshSummaryButton != null) {
-            refreshSummaryButton.setEnabled(updateMode == SummaryUpdateMode.MANUAL);
-        }
     }
 
     private void copyAllSummaryText() {
@@ -201,12 +244,25 @@ public class SummaryActivity extends Activity {
         LiveSummaryStore.saveEditedSummary(this, String.valueOf(summaryText.getText()));
     }
 
-    private void requestManualSummaryRefresh() {
-        if (LiveSummaryStore.getSummaryUpdateMode(this) != SummaryUpdateMode.MANUAL) {
-            Toast.makeText(this, "手動更新モードで利用できます", Toast.LENGTH_SHORT).show();
+    private void persistSummaryPromptTemplate() {
+        if (promptTemplateText == null) {
             return;
         }
+        LiveSummaryStore.setSummaryPromptTemplate(this, String.valueOf(promptTemplateText.getText()));
+    }
+
+    private void resetSummaryPromptTemplate() {
+        if (promptTemplateText == null) {
+            return;
+        }
+        promptTemplateText.setText(OllamaClient.DEFAULT_SUMMARY_PROMPT_TEMPLATE);
+        promptTemplateText.setSelection(promptTemplateText.length());
+        Toast.makeText(this, "要約プロンプトを初期化しました", Toast.LENGTH_SHORT).show();
+    }
+
+    private void requestManualSummaryRefresh() {
         persistSummaryText();
+        persistSummaryPromptTemplate();
         Intent intent = new Intent(this, VoiceListenerService.class);
         intent.setAction(VoiceListenerService.ACTION_REFRESH_SUMMARY);
         if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.O) {
@@ -214,7 +270,7 @@ public class SummaryActivity extends Activity {
         } else {
             startService(intent);
         }
-        Toast.makeText(this, "要約更新を要求しました", Toast.LENGTH_SHORT).show();
+        Toast.makeText(this, "要約実行を要求しました", Toast.LENGTH_SHORT).show();
         updateSummaryDisplay();
     }
 
@@ -244,6 +300,7 @@ public class SummaryActivity extends Activity {
     protected void onPause() {
         super.onPause();
         persistSummaryText();
+        persistSummaryPromptTemplate();
         if (uiHandler != null && periodicUpdateRunnable != null) {
             uiHandler.removeCallbacks(periodicUpdateRunnable);
         }

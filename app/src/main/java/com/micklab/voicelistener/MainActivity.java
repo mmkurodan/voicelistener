@@ -53,7 +53,8 @@ public class MainActivity extends Activity {
     private Button startButton;
     private Button stopButton;
     private TextView statusText;
-    private EditText logContentText;
+    private EditText transcriptionContentText;
+    private EditText systemLogContentText;
 
     private Handler uiHandler;
     private Runnable periodicUpdateRunnable;
@@ -97,6 +98,28 @@ public class MainActivity extends Activity {
     private final SimpleDateFormat summaryTimeFormat = new SimpleDateFormat("HH:mm:ss", Locale.JAPAN);
     private boolean suppressOllamaSelectionCallback = false;
     private boolean suppressSummaryModeSelectionCallback = false;
+
+    private static final class DisplayLogEntry {
+        private final String minuteLabel;
+        private final String message;
+        private final boolean transcription;
+
+        private DisplayLogEntry(String minuteLabel, String message, boolean transcription) {
+            this.minuteLabel = minuteLabel == null ? "" : minuteLabel;
+            this.message = message == null ? "" : message;
+            this.transcription = transcription;
+        }
+    }
+
+    private static final class LatestLogSections {
+        private final String transcriptionText;
+        private final String systemLogText;
+
+        private LatestLogSections(String transcriptionText, String systemLogText) {
+            this.transcriptionText = transcriptionText == null ? "" : transcriptionText;
+            this.systemLogText = systemLogText == null ? "" : systemLogText;
+        }
+    }
     
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -107,6 +130,9 @@ public class MainActivity extends Activity {
         ollamaExecutor = Executors.newSingleThreadExecutor();
         
         createUI();
+        if (savedInstanceState == null) {
+            fetchOllamaModels(false);
+        }
         checkPermissions();
     }
     
@@ -426,20 +452,23 @@ public class MainActivity extends Activity {
         refreshLogButton.setOnClickListener(v -> updateLogDisplay());
         layout.addView(refreshLogButton);
         
-        // ログ内容表示
-        TextView logLabel = new TextView(this);
-        logLabel.setText("最新ログ内容:");
-        logLabel.setTextSize(14);
-        logLabel.setPadding(0, 20, 0, 10);
-        layout.addView(logLabel);
-        
-        logContentText = new EditText(this);
-        logContentText.setTextSize(10);
-        logContentText.setBackgroundColor(0xFF000000);
-        logContentText.setTextColor(0xFF00FF00);
-        logContentText.setPadding(10, 10, 10, 10);
-        configureReadOnlyLogTextArea(logContentText, 500);
-        layout.addView(logContentText);
+        TextView transcriptionLabel = new TextView(this);
+        transcriptionLabel.setText("文字起こし:");
+        transcriptionLabel.setTextSize(14);
+        transcriptionLabel.setPadding(0, 20, 0, 10);
+        layout.addView(transcriptionLabel);
+
+        transcriptionContentText = createReadOnlyLogTextArea(240);
+        layout.addView(transcriptionContentText);
+
+        TextView systemLogLabel = new TextView(this);
+        systemLogLabel.setText("システムログ:");
+        systemLogLabel.setTextSize(14);
+        systemLogLabel.setPadding(0, 20, 0, 10);
+        layout.addView(systemLogLabel);
+
+        systemLogContentText = createReadOnlyLogTextArea(240);
+        layout.addView(systemLogContentText);
 
         refreshModelSpinner(false);
         refreshOllamaModelSpinner(false);
@@ -452,6 +481,16 @@ public class MainActivity extends Activity {
         rootScrollView.setFillViewport(true);
         rootScrollView.addView(layout);
         setContentView(rootScrollView);
+    }
+
+    private EditText createReadOnlyLogTextArea(int heightPx) {
+        EditText textArea = new EditText(this);
+        textArea.setTextSize(10);
+        textArea.setBackgroundColor(0xFF000000);
+        textArea.setTextColor(0xFF00FF00);
+        textArea.setPadding(10, 10, 10, 10);
+        configureReadOnlyLogTextArea(textArea, heightPx);
+        return textArea;
     }
 
     private void configureReadOnlyLogTextArea(EditText textArea, int heightPx) {
@@ -488,29 +527,90 @@ public class MainActivity extends Activity {
         });
     }
 
-    private void setLogContentTextKeepingViewport(String text) {
-        if (logContentText == null) return;
+    private void setTextAreaContentKeepingViewport(EditText textArea, String text) {
+        if (textArea == null) return;
         String nextText = text == null ? "" : text;
-        CharSequence currentText = logContentText.getText();
+        CharSequence currentText = textArea.getText();
         if (currentText != null && nextText.contentEquals(currentText)) {
             return;
         }
 
-        int scrollX = logContentText.getScrollX();
-        int scrollY = logContentText.getScrollY();
-        logContentText.setTextKeepState(nextText);
-        logContentText.post(() -> {
-            if (logContentText == null || logContentText.getLayout() == null) {
+        int scrollX = textArea.getScrollX();
+        int scrollY = textArea.getScrollY();
+        textArea.setTextKeepState(nextText);
+        textArea.post(() -> {
+            if (textArea.getLayout() == null) {
                 return;
             }
             int maxScrollY = Math.max(
                 0,
-                logContentText.getLayout().getHeight()
-                    - logContentText.getHeight()
-                    + logContentText.getCompoundPaddingTop()
-                    + logContentText.getCompoundPaddingBottom());
-            logContentText.scrollTo(scrollX, Math.min(scrollY, maxScrollY));
+                textArea.getLayout().getHeight()
+                    - textArea.getHeight()
+                    + textArea.getCompoundPaddingTop()
+                    + textArea.getCompoundPaddingBottom());
+            textArea.scrollTo(scrollX, Math.min(scrollY, maxScrollY));
         });
+    }
+
+    private LatestLogSections loadLatestLogSections(File latestLogFile, int maxLines) throws IOException {
+        Deque<DisplayLogEntry> entries = new ArrayDeque<>(maxLines);
+        String currentMinuteLabel = "";
+        try (BufferedReader reader = new BufferedReader(new FileReader(latestLogFile))) {
+            String line;
+            while ((line = reader.readLine()) != null) {
+                String trimmed = line.trim();
+                if (trimmed.isEmpty()) {
+                    continue;
+                }
+                if (isMinuteHeader(trimmed)) {
+                    currentMinuteLabel = extractMinuteLabel(trimmed);
+                    continue;
+                }
+                boolean transcription = trimmed.startsWith("認識:") || trimmed.startsWith("認識：");
+                String message = transcription ? stripRecognitionPrefix(trimmed) : trimmed;
+                if (message.isEmpty()) {
+                    continue;
+                }
+                if (entries.size() == maxLines) {
+                    entries.removeFirst();
+                }
+                entries.addLast(new DisplayLogEntry(currentMinuteLabel, message, transcription));
+            }
+        }
+        return new LatestLogSections(
+            buildLogSectionText(entries, true, "文字起こしはまだありません"),
+            buildLogSectionText(entries, false, "システムログはまだありません")
+        );
+    }
+
+    private String buildLogSectionText(Deque<DisplayLogEntry> entries, boolean transcription, String emptyMessage) {
+        StringBuilder builder = new StringBuilder();
+        String lastMinuteLabel = null;
+        for (java.util.Iterator<DisplayLogEntry> iterator = entries.descendingIterator(); iterator.hasNext(); ) {
+            DisplayLogEntry entry = iterator.next();
+            if (entry.transcription != transcription) {
+                continue;
+            }
+            if (!entry.minuteLabel.isEmpty() && !entry.minuteLabel.equals(lastMinuteLabel)) {
+                builder.append('[').append(entry.minuteLabel).append("] ");
+                lastMinuteLabel = entry.minuteLabel;
+            }
+            builder.append(entry.message).append('\n');
+        }
+        return builder.length() == 0 ? emptyMessage : builder.toString();
+    }
+
+    private boolean isMinuteHeader(String line) {
+        return line.startsWith("[") && line.endsWith("]");
+    }
+
+    private String extractMinuteLabel(String line) {
+        String timestamp = line.substring(1, Math.max(1, line.length() - 1)).trim();
+        return timestamp.length() >= 16 ? timestamp.substring(11, 16) : timestamp;
+    }
+
+    private String stripRecognitionPrefix(String line) {
+        return line.replaceFirst("^認識[:：]\\s*", "");
     }
     
     private void checkPermissions() {
@@ -819,10 +919,16 @@ public class MainActivity extends Activity {
     }
 
     private void fetchOllamaModels() {
+        fetchOllamaModels(true);
+    }
+
+    private void fetchOllamaModels(boolean showFeedback) {
         saveOllamaBaseUrlFromInput();
         ensureOllamaExecutor();
         String baseUrl = LiveSummaryStore.getOllamaBaseUrl(this);
-        Toast.makeText(this, "Ollamaモデル一覧を取得しています", Toast.LENGTH_SHORT).show();
+        if (showFeedback) {
+            Toast.makeText(this, "Ollamaモデル一覧を取得しています", Toast.LENGTH_SHORT).show();
+        }
         ollamaExecutor.execute(() -> {
             try {
                 List<String> models = new ArrayList<>(ollamaClient.listModelNames(baseUrl));
@@ -833,10 +939,18 @@ public class MainActivity extends Activity {
                 LiveSummaryStore.setCachedModelNames(this, models);
                 runOnUiThread(() -> {
                     refreshOllamaModelSpinner(true);
-                    Toast.makeText(this, "Ollamaモデル一覧を更新しました", Toast.LENGTH_SHORT).show();
+                    if (showFeedback) {
+                        Toast.makeText(this, "Ollamaモデル一覧を更新しました", Toast.LENGTH_SHORT).show();
+                    }
                 });
             } catch (IOException e) {
-                runOnUiThread(() -> Toast.makeText(this, "Ollamaモデル一覧取得失敗: " + e.getMessage(), Toast.LENGTH_LONG).show());
+                runOnUiThread(() -> {
+                    if (showFeedback) {
+                        Toast.makeText(this, "Ollamaモデル一覧取得失敗: " + e.getMessage(), Toast.LENGTH_LONG).show();
+                    } else if (logManager != null) {
+                        logManager.writeLog("Ollamaモデル一覧自動取得失敗: " + e.getMessage());
+                    }
+                });
             }
         });
     }
@@ -905,70 +1019,18 @@ public class MainActivity extends Activity {
     
     private void updateLogDisplay() {
         try {
-            File[] logFiles = logManager.getLogFiles();
-            if (logFiles == null || logFiles.length == 0) {
-                setLogContentTextKeepingViewport("ログファイルがありません");
+            File latestLogFile = logManager.getLatestLogFile();
+            if (latestLogFile == null || !latestLogFile.exists()) {
+                setTextAreaContentKeepingViewport(transcriptionContentText, "文字起こしはまだありません");
+                setTextAreaContentKeepingViewport(systemLogContentText, "システムログはまだありません");
                 return;
             }
-
-            // 最新のログファイルを取得
-            File latestLogFile = null;
-            long latestTime = 0;
-            for (File file : logFiles) {
-                if (file.lastModified() > latestTime) {
-                    latestTime = file.lastModified();
-                    latestLogFile = file;
-                }
-            }
-
-            if (latestLogFile != null) {
-                // ログは末尾200行を表示する
-                int maxLines = 200;
-                Deque<String> deque = new ArrayDeque<>(maxLines);
-                try (BufferedReader reader = new BufferedReader(new FileReader(latestLogFile))) {
-                    String line;
-                    while ((line = reader.readLine()) != null) {
-                        if (deque.size() == maxLines) deque.removeFirst();
-                        deque.addLast(line);
-                    }
-                }
-
-                StringBuilder logContent = new StringBuilder();
-                String lastMinute = null;
-                for (java.util.Iterator<String> it = deque.descendingIterator(); it.hasNext(); ) {
-                    String l = it.next();
-                    String minute = null;
-                    String msg = l;
-                    if (l.startsWith("[") && l.contains("]")) {
-                        int end = l.indexOf(']');
-                        if (end > 1) {
-                            String ts = l.substring(1, end);
-                            if (ts.length() >= 16) {
-                                try { minute = ts.substring(11, 16); } catch (Exception ignored) { minute = ts; }
-                            } else {
-                                minute = ts;
-                            }
-                            if (l.length() > end + 2) msg = l.substring(end + 2).trim(); else msg = "";
-                        }
-                    }
-
-                    // 認識プレフィックスを削除
-                    msg = msg.replaceFirst("^認識[:：]\\s*", "");
-
-                    if (minute != null) {
-                        if (!minute.equals(lastMinute)) {
-                            logContent.append("[").append(minute).append("] ");
-                            lastMinute = minute;
-                        }
-                    }
-                    logContent.append(msg).append('\n');
-                }
-
-                setLogContentTextKeepingViewport(logContent.toString());
-            }
-
+            LatestLogSections logSections = loadLatestLogSections(latestLogFile, 200);
+            setTextAreaContentKeepingViewport(transcriptionContentText, logSections.transcriptionText);
+            setTextAreaContentKeepingViewport(systemLogContentText, logSections.systemLogText);
         } catch (IOException e) {
-            setLogContentTextKeepingViewport("ログ読み込みエラー: " + e.getMessage());
+            setTextAreaContentKeepingViewport(transcriptionContentText, "文字起こし読み込みエラー: " + e.getMessage());
+            setTextAreaContentKeepingViewport(systemLogContentText, "システムログ読み込みエラー: " + e.getMessage());
         }
     }
 

@@ -8,12 +8,8 @@ import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
 import android.text.Editable;
-import android.text.InputType;
 import android.text.TextWatcher;
-import android.text.method.ScrollingMovementMethod;
-import android.view.View;
 import android.widget.Button;
-import android.widget.EditText;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 import android.widget.Toast;
@@ -27,8 +23,8 @@ public class OllamaDebugActivity extends Activity {
     private Handler uiHandler;
     private Runnable periodicUpdateRunnable;
     private TextView statusText;
-    private EditText promptTemplateText;
-    private EditText historyText;
+    private SelectableTextArea promptTemplateText;
+    private SelectableTextArea historyText;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -125,58 +121,29 @@ public class OllamaDebugActivity extends Activity {
         return label;
     }
 
-    private EditText createEditableTextArea(int heightPx, float weight) {
-        EditText output = new EditText(this);
+    private SelectableTextArea createEditableTextArea(int heightPx, float weight) {
+        SelectableTextArea output = new SelectableTextArea(this);
         output.setTextSize(15);
         output.setBackgroundColor(0xFFF3F3F3);
         output.setTextColor(0xFF111111);
         output.setPadding(10, 10, 10, 10);
-        output.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES);
-        output.setGravity(android.view.Gravity.TOP | android.view.Gravity.START);
-        output.setCursorVisible(true);
-        output.setLongClickable(true);
-        output.setTextIsSelectable(true);
-        output.setFocusable(true);
-        output.setFocusableInTouchMode(true);
-        output.setHorizontallyScrolling(false);
-        output.setVerticalScrollBarEnabled(true);
-        output.setMovementMethod(ScrollingMovementMethod.getInstance());
-        output.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
-        output.setLayoutParams(weight > 0f
-            ? new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                0,
-                weight
-            )
-            : new LinearLayout.LayoutParams(
-                LinearLayout.LayoutParams.MATCH_PARENT,
-                heightPx
-            ));
+        output.configureEditableText();
+        if (weight > 0f) {
+            output.setWeightedHeight(weight);
+        } else {
+            output.setFixedHeight(heightPx);
+        }
         return output;
     }
 
-    private EditText createReadOnlyTextArea() {
-        EditText output = new EditText(this);
+    private SelectableTextArea createReadOnlyTextArea() {
+        SelectableTextArea output = new SelectableTextArea(this);
         output.setTextSize(12);
         output.setBackgroundColor(0xFFF3F3F3);
         output.setTextColor(0xFF111111);
         output.setPadding(10, 10, 10, 10);
-        output.setKeyListener(null);
-        output.setCursorVisible(false);
-        output.setLongClickable(true);
-        output.setTextIsSelectable(true);
-        output.setFocusable(true);
-        output.setFocusableInTouchMode(true);
-        output.setShowSoftInputOnFocus(false);
-        output.setHorizontallyScrolling(false);
-        output.setVerticalScrollBarEnabled(true);
-        output.setMovementMethod(ScrollingMovementMethod.getInstance());
-        output.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
-        output.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT,
-            0,
-            1f
-        ));
+        output.configureReadOnlyText();
+        output.setWeightedHeight(1f);
         return output;
     }
 

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.micklab.voicelistener.SpeechRecognizerConfigTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-04-12T20:38:57" hostname="localhost" time="0.003">
+<testsuite name="com.micklab.voicelistener.SpeechRecognizerConfigTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-04-14T01:14:33" hostname="localhost" time="0.008">
   <properties/>
   <testcase name="defaultLanguage_isJapanese" classname="com.micklab.voicelistener.SpeechRecognizerConfigTest" time="0.0"/>
-  <testcase name="defaultThreadCount_staysWithinSafeBounds" classname="com.micklab.voicelistener.SpeechRecognizerConfigTest" time="0.003"/>
+  <testcase name="defaultThreadCount_staysWithinSafeBounds" classname="com.micklab.voicelistener.SpeechRecognizerConfigTest" time="0.007"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
 </testsuite>

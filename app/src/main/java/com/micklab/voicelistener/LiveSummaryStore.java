@@ -94,7 +94,16 @@ public final class LiveSummaryStore {
 
     public static String getSummaryPromptTemplate(Context context) {
         String raw = getPrefs(context).getString(PREF_SUMMARY_PROMPT_TEMPLATE, null);
-        return raw == null ? OllamaClient.DEFAULT_SUMMARY_PROMPT_TEMPLATE : normalizePromptTemplate(raw);
+        if (raw == null) {
+            return OllamaClient.DEFAULT_SUMMARY_PROMPT_TEMPLATE;
+        }
+
+        String normalized = normalizePromptTemplate(raw);
+        if (OllamaClient.LEGACY_DEFAULT_SUMMARY_PROMPT_TEMPLATE.equals(normalized)) {
+            setSummaryPromptTemplate(context, OllamaClient.DEFAULT_SUMMARY_PROMPT_TEMPLATE);
+            return OllamaClient.DEFAULT_SUMMARY_PROMPT_TEMPLATE;
+        }
+        return normalized;
     }
 
     public static void setSummaryPromptTemplate(Context context, String promptTemplate) {

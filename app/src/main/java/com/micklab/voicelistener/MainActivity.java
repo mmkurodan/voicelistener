@@ -9,8 +9,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.Environment;
 import android.text.InputType;
-import android.text.method.ScrollingMovementMethod;
-import android.view.MotionEvent;
 import android.view.View;
 import android.widget.AdapterView;
 import android.widget.Button;
@@ -53,8 +51,8 @@ public class MainActivity extends Activity {
     private Button startButton;
     private Button stopButton;
     private TextView statusText;
-    private EditText transcriptionContentText;
-    private EditText systemLogContentText;
+    private SelectableTextArea transcriptionContentText;
+    private SelectableTextArea systemLogContentText;
 
     private Handler uiHandler;
     private Runnable periodicUpdateRunnable;
@@ -483,8 +481,8 @@ public class MainActivity extends Activity {
         setContentView(rootScrollView);
     }
 
-    private EditText createReadOnlyLogTextArea(int heightPx) {
-        EditText textArea = new EditText(this);
+    private SelectableTextArea createReadOnlyLogTextArea(int heightPx) {
+        SelectableTextArea textArea = new SelectableTextArea(this);
         textArea.setTextSize(10);
         textArea.setBackgroundColor(0xFF000000);
         textArea.setTextColor(0xFF00FF00);
@@ -493,41 +491,13 @@ public class MainActivity extends Activity {
         return textArea;
     }
 
-    private void configureReadOnlyLogTextArea(EditText textArea, int heightPx) {
-        textArea.setKeyListener(null);
-        textArea.setCursorVisible(false);
-        textArea.setLongClickable(true);
-        textArea.setTextIsSelectable(true);
-        textArea.setFocusable(true);
-        textArea.setFocusableInTouchMode(true);
-        textArea.setShowSoftInputOnFocus(false);
-        textArea.setHorizontallyScrolling(false);
-        textArea.setVerticalScrollBarEnabled(true);
-        textArea.setMovementMethod(ScrollingMovementMethod.getInstance());
-        textArea.setOverScrollMode(View.OVER_SCROLL_IF_CONTENT_SCROLLS);
-        textArea.setLayoutParams(new LinearLayout.LayoutParams(
-            LinearLayout.LayoutParams.MATCH_PARENT, heightPx));
-        textArea.setOnTouchListener((v, event) -> {
-            if (v.getParent() == null) {
-                return false;
-            }
-            switch (event.getActionMasked()) {
-                case MotionEvent.ACTION_DOWN:
-                case MotionEvent.ACTION_MOVE:
-                    v.getParent().requestDisallowInterceptTouchEvent(true);
-                    break;
-                case MotionEvent.ACTION_UP:
-                case MotionEvent.ACTION_CANCEL:
-                    v.getParent().requestDisallowInterceptTouchEvent(false);
-                    break;
-                default:
-                    break;
-            }
-            return false;
-        });
+    private void configureReadOnlyLogTextArea(SelectableTextArea textArea, int heightPx) {
+        textArea.configureReadOnlyText();
+        textArea.setFixedHeight(heightPx);
+        textArea.enableParentScrollGuard();
     }
 
-    private void setTextAreaContentKeepingViewport(EditText textArea, String text) {
+    private void setTextAreaContentKeepingViewport(SelectableTextArea textArea, String text) {
         if (textArea == null) return;
         String nextText = text == null ? "" : text;
         CharSequence currentText = textArea.getText();

@@ -25,14 +25,28 @@ public class OllamaClient {
     private static final int CONNECT_TIMEOUT_MS = 10000;
     private static final int READ_TIMEOUT_MS = 120000;
     private static final int MAX_LOG_CONTEXT_CHARS = 6000;
+    static final int MAX_SUMMARY_RETRIES = 10;
+    private static final int MAX_SUMMARY_ATTEMPTS = MAX_SUMMARY_RETRIES + 1;
     public static final String SUMMARY_PROMPT_PLACEHOLDER_PREVIOUS_SUMMARY = "{{previous_summary}}";
     public static final String SUMMARY_PROMPT_PLACEHOLDER_NEW_LOGS = "{{new_recognition_logs}}";
-    public static final String DEFAULT_SUMMARY_PROMPT_TEMPLATE = "あなたは会議要約アシスタントです。\n"
+    static final String LEGACY_DEFAULT_SUMMARY_PROMPT_TEMPLATE = "あなたは会議要約アシスタントです。\n"
         + "会議内容の要約をしてください。\n"
         + "決定事項やToDoは配列で個別に返さず、重要であればsummary本文の中で自然に触れてください。\n"
         + "\n"
         + "必ずJSONオブジェクトのみを返してください。説明文は不要です。\n"
         + "形式: {\"summary\":\"更新後の全文要約\"}\n"
+        + "\n"
+        + "\n"
+        + SUMMARY_PROMPT_PLACEHOLDER_PREVIOUS_SUMMARY
+        + "\n"
+        + SUMMARY_PROMPT_PLACEHOLDER_NEW_LOGS;
+    public static final String DEFAULT_SUMMARY_PROMPT_TEMPLATE = "あなたは会議要約アシスタントです。\n"
+        + "会議内容を日本語のMarkdownで要約してください。\n"
+        + "見出しや箇条書きを使って、重要事項がすぐ把握できる構成にしてください。\n"
+        + "決定事項やToDoは配列で個別に返さず、重要であればsummary本文の見出しや箇条書きの中で自然に触れてください。\n"
+        + "\n"
+        + "必ずJSONオブジェクトのみを返してください。説明文やコードフェンスは不要です。\n"
+        + "形式: {\"summary\":\"Markdown形式の更新後全文要約\"}\n"
         + "\n"
         + "\n"
         + SUMMARY_PROMPT_PLACEHOLDER_PREVIOUS_SUMMARY
@@ -66,15 +80,17 @@ public class OllamaClient {
     public static final class SummaryGenerationException extends IOException {
         private final String prompt;
         private final String rawResponse;
+        private final boolean retryable;
 
-        SummaryGenerationException(String message, String prompt, String rawResponse, Throwable cause) {
+        SummaryGenerationException(String message, String prompt, String rawResponse, boolean retryable, Throwable cause) {
             super(message, cause);
             this.prompt = prompt == null ? "" : prompt;
             this.rawResponse = rawResponse == null ? "" : rawResponse;
+            this.retryable = retryable;
         }
 
-        SummaryGenerationException(String message, String prompt, String rawResponse) {
-            this(message, prompt, rawResponse, null);
+        SummaryGenerationException(String message, String prompt, String rawResponse, boolean retryable) {
+            this(message, prompt, rawResponse, retryable, null);
         }
 
         public String getPrompt() {
@@ -83,6 +99,10 @@ public class OllamaClient {
 
         public String getRawResponse() {
             return rawResponse;
+        }
+
+        public boolean isRetryable() {
+            return retryable;
         }
     }
 
@@ -137,9 +157,26 @@ public class OllamaClient {
     SummaryGenerationResult generateSummaryFromPrompt(String baseUrl, String model, String prompt) throws IOException {
         String safePrompt = prompt == null ? "" : prompt.trim();
         if (safePrompt.isEmpty()) {
-            throw new SummaryGenerationException("要約プロンプトが空です", safePrompt, "");
+            throw new SummaryGenerationException("要約プロンプトが空です", safePrompt, "", false);
         }
 
+        for (int attempt = 1; attempt <= MAX_SUMMARY_ATTEMPTS; attempt++) {
+            try {
+                return requestSummaryAttempt(baseUrl, model, safePrompt);
+            } catch (SummaryGenerationException e) {
+                if (!e.isRetryable()) {
+                    throw e;
+                }
+                if (attempt >= MAX_SUMMARY_ATTEMPTS) {
+                    throw exhaustedRetries(e);
+                }
+                logRetryFailure(attempt, e);
+            }
+        }
+        throw new SummaryGenerationException("要約生成に失敗しました", safePrompt, "", true);
+    }
+
+    SummaryGenerationResult requestSummaryAttempt(String baseUrl, String model, String safePrompt) throws IOException {
         HttpURLConnection connection = null;
         String rawResponse = "";
         try {
@@ -167,34 +204,56 @@ public class OllamaClient {
                 ? readResponseBody(connection)
                 : readStream(connection.getErrorStream());
             if (code / 100 != 2) {
-                throw new SummaryGenerationException("HTTP " + code + ": " + rawResponse, safePrompt, rawResponse);
+                throw new SummaryGenerationException("HTTP " + code + ": " + rawResponse, safePrompt, rawResponse, true);
             }
 
+            return parseSummaryResponse(safePrompt, rawResponse);
+        } catch (JSONException e) {
+            throw new SummaryGenerationException("要約リクエストのJSON生成に失敗しました", safePrompt, rawResponse, false, e);
+        } catch (SummaryGenerationException e) {
+            throw e;
+        } catch (IOException e) {
+            String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
+            throw new SummaryGenerationException(message, safePrompt, rawResponse, true, e);
+        } finally {
+            if (connection != null) {
+                connection.disconnect();
+            }
+        }
+    }
+
+    SummaryGenerationResult parseSummaryResponse(String prompt, String rawResponse) throws IOException {
+        try {
             JSONObject response = new JSONObject(rawResponse);
-            String body = response.optString("response", "").trim();
-            JSONObject parsed = new JSONObject(extractJsonObject(body));
+            Object responseBody = response.opt("response");
+            if (!(responseBody instanceof String)) {
+                throw new SummaryGenerationException("要約レスポンスが想定JSON形式ではありません", prompt, rawResponse, true);
+            }
+
+            JSONObject parsed = new JSONObject(extractJsonObject(((String) responseBody).trim()));
+            Object summaryValue = parsed.opt("summary");
+            if (!(summaryValue instanceof String)) {
+                throw new SummaryGenerationException("要約レスポンスが想定JSON形式ではありません", prompt, rawResponse, true);
+            }
+
             return new SummaryGenerationResult(
-                safePrompt,
+                prompt,
                 rawResponse,
                 new LiveSummaryState(
-                    parsed.optString("summary", ""),
+                    ((String) summaryValue).trim(),
                     new ArrayList<>(),
                     new ArrayList<>(),
                     "",
                     0L
                 )
             );
-        } catch (JSONException e) {
-            throw new SummaryGenerationException("要約レスポンスのJSON解析に失敗しました", safePrompt, rawResponse, e);
         } catch (SummaryGenerationException e) {
             throw e;
+        } catch (JSONException e) {
+            throw new SummaryGenerationException("要約レスポンスのJSON解析に失敗しました", prompt, rawResponse, true, e);
         } catch (IOException e) {
             String message = e.getMessage() == null ? e.getClass().getSimpleName() : e.getMessage();
-            throw new SummaryGenerationException(message, safePrompt, rawResponse, e);
-        } finally {
-            if (connection != null) {
-                connection.disconnect();
-            }
+            throw new SummaryGenerationException(message, prompt, rawResponse, true, e);
         }
     }
 
@@ -307,6 +366,20 @@ public class OllamaClient {
             }
         }
         return new ArrayList<>(merged);
+    }
+
+    void logRetryFailure(int attempt, SummaryGenerationException cause) {
+        Log.w(TAG, "Summary generation failed on attempt " + attempt + "/" + MAX_SUMMARY_ATTEMPTS + ", retrying", cause);
+    }
+
+    private SummaryGenerationException exhaustedRetries(SummaryGenerationException cause) {
+        return new SummaryGenerationException(
+            "要約更新が" + MAX_SUMMARY_RETRIES + "回のリトライ後も失敗しました: " + cause.getMessage(),
+            cause.getPrompt(),
+            cause.getRawResponse(),
+            false,
+            cause
+        );
     }
 
     private String normalizeBaseUrl(String baseUrl) {

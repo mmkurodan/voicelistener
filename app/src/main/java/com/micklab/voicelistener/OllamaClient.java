@@ -41,13 +41,18 @@ public class OllamaClient {
         + "\n"
         + SUMMARY_PROMPT_PLACEHOLDER_NEW_LOGS;
     public static final String DEFAULT_SUMMARY_PROMPT_TEMPLATE = "あなたは会議要約アシスタントです。\n"
-        + "次の会議発話ログを読み、更新された要約を作成してください。\n"
-        + "要点を短く箇条書きで示し、重要な決定事項やToDoを含めてください。\n"
+        + "会議内容を日本語のMarkdownで要約してください。\n"
         + "\n"
-        + "出力はJSONオブジェクトのみで返してください。\n"
-        + "形式: {\"summary\":\"更新後の全文要約\"}\n"
+        + "## 要約の形式\n"
+        + "- 見出しや箇条書きを使って、重要事項がすぐ把握できる構成にする\n"
+        + "- 決定事項やToDoは配列で個別に返さず、重要であれば summary 本文の見出しや箇条書きの中で自然に触れる\n"
         + "\n"
+        + "## 出力仕様\n"
+        + "- 必ず JSON オブジェクトのみを返す\n"
+        + "- 説明文やコードフェンスは不要\n"
+        + "- 形式: {\"summary\":\"Markdown形式の更新後全文要約\"}\n"
         + "\n"
+        + "## 入力プレースホルダ\n"
         + SUMMARY_PROMPT_PLACEHOLDER_PREVIOUS_SUMMARY
         + "\n"
         + SUMMARY_PROMPT_PLACEHOLDER_NEW_LOGS;

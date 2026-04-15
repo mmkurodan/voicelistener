@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.micklab.voicelistener.SummaryUpdateModeTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-04-14T01:14:33" hostname="localhost" time="0.01">
+<testsuite name="com.micklab.voicelistener.SummaryUpdateModeTest" tests="2" skipped="0" failures="0" errors="0" timestamp="2026-04-15T11:48:12" hostname="localhost" time="0.014">
   <properties/>
-  <testcase name="fromPreference_readsManualCaseInsensitively" classname="com.micklab.voicelistener.SummaryUpdateModeTest" time="0.009"/>
+  <testcase name="fromPreference_readsManualCaseInsensitively" classname="com.micklab.voicelistener.SummaryUpdateModeTest" time="0.013"/>
   <testcase name="fromPreference_defaultsToAutoForUnknownValues" classname="com.micklab.voicelistener.SummaryUpdateModeTest" time="0.0"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>

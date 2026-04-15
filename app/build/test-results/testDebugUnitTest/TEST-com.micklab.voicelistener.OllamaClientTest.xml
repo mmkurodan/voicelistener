@@ -1,10 +1,10 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<testsuite name="com.micklab.voicelistener.OllamaClientTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-04-14T01:14:33" hostname="localhost" time="0.014">
+<testsuite name="com.micklab.voicelistener.OllamaClientTest" tests="5" skipped="0" failures="0" errors="0" timestamp="2026-04-15T11:48:12" hostname="localhost" time="0.004">
   <properties/>
-  <testcase name="generateSummaryFromPrompt_stopsAfterMaxRetries" classname="com.micklab.voicelistener.OllamaClientTest" time="0.006"/>
+  <testcase name="generateSummaryFromPrompt_stopsAfterMaxRetries" classname="com.micklab.voicelistener.OllamaClientTest" time="0.001"/>
   <testcase name="buildSummaryPrompt_updatesSummaryFromPreviousSummaryAndDiffLogs" classname="com.micklab.voicelistener.OllamaClientTest" time="0.001"/>
-  <testcase name="parseSummaryResponse_rejectsUnexpectedJsonFormat" classname="com.micklab.voicelistener.OllamaClientTest" time="0.005"/>
-  <testcase name="buildSummaryPrompt_replacesEditableTemplatePlaceholders" classname="com.micklab.voicelistener.OllamaClientTest" time="0.0"/>
+  <testcase name="parseSummaryResponse_rejectsUnexpectedJsonFormat" classname="com.micklab.voicelistener.OllamaClientTest" time="0.0"/>
+  <testcase name="buildSummaryPrompt_replacesEditableTemplatePlaceholders" classname="com.micklab.voicelistener.OllamaClientTest" time="0.001"/>
   <testcase name="generateSummaryFromPrompt_retriesUntilSuccess" classname="com.micklab.voicelistener.OllamaClientTest" time="0.001"/>
   <system-out><![CDATA[]]></system-out>
   <system-err><![CDATA[]]></system-err>
